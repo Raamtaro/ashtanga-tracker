@@ -6,10 +6,196 @@
 
 generator client {
   provider = "prisma-client"
-  output   = "../generated/prisma"
 }
 
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
+}
+
+model Session {
+  id        String   @id
+  sid       String   @unique
+  data      String
+  expiresAt DateTime
+}
+
+model User {
+  id        String            @id @default(cuid())
+  email     String            @unique
+  name      String?
+  password  String // hashed!
+  profile   Profile?
+  sessions  PracticeSession[]
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+}
+
+model Profile {
+  id     String @id @default(cuid())
+  user   User   @relation(fields: [userId], references: [id])
+  userId String @unique
+
+  ageYears Int?
+  heightCm Int?
+  weightKg Int?
+
+  notes    String? // misc info that doesn’t fit anywhere else
+  injuries Injury[]
+}
+
+model Injury {
+  id        String  @id @default(cuid())
+  profile   Profile @relation(fields: [profileId], references: [id])
+  profileId String
+
+  name     String // "Right hamstring", "Low back", etc
+  bodyArea String? // could later become enum
+  severity InjurySeverity @default(MILD)
+  isActive Boolean        @default(true)
+  notes    String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+enum InjurySeverity {
+  MILD
+  MODERATE
+  SEVERE
+}
+
+model Pose {
+  id            String        @id @default(cuid())
+  slug          String        @unique // "utthita-trikonasana"
+  sanskritName  String
+  englishName   String?
+  // category      PoseCategory  // Standing / Primary / Intermediate / etc.
+  sequenceGroup SequenceGroup // where it usually appears in the flow
+  orderInGroup  Int? // canonical order within that group
+  isTwoSided    Boolean       @default(false)
+
+  scoreCards ScoreCard[]
+}
+
+// enum PoseCategory { // Redundant
+//   SUN_A
+//   SUN_B
+//   STANDING
+//   PRIMARY
+//   INTERMEDIATE
+//   ADVANCED_A
+//   ADVANCED_B
+//   ADVANCED_C
+//   ADVANCED_D
+//   FINISHING
+//   BACKBENDING
+//   OTHER
+// }
+
+enum SequenceGroup {
+  WARMUP
+  SUN_SALUTATIONS
+  STANDING
+  PRIMARY
+  INTERMEDIATE
+  ADVANCED_A
+  ADVANCED_B
+  BACKBENDING
+  FINISHING
+  OTHER
+}
+
+model PracticeSession {
+  id     String @id @default(cuid())
+  user   User   @relation(fields: [userId], references: [id])
+  userId String
+
+  date            DateTime // date of practice (you can also store startTime if needed)
+  label           String? // "Full primary", "Half primary + Int to Pincha"
+  practiceType    PracticeType? // enum to help querying
+  durationMinutes Int?
+  status          Status        @default(DRAFT) // "draft", "published", etc.
+
+  // Session-level meta
+  overallScore Float? // denormalized average of pose scores (optional)
+  energyLevel  Int? // 1–10
+  mood         Int? // 1–10
+  notes        String? // "felt tight in right hamstring today"
+
+  scoreCards ScoreCard[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, date])
+}
+
+enum Status {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum PracticeType {
+  FULL_PRIMARY
+  HALF_PRIMARY
+  HALF_PRIMARY_PLUS_INTERMEDIATE
+  PRIMARY_PLUS_INTERMEDIATE
+  FULL_INTERMEDIATE
+  INTERMEDIATE_PLUS_ADVANCED
+  ADVANCED_A
+  ADVANCED_B
+  CUSTOM
+}
+
+model ScoreCard {
+  id String @id @default(cuid())
+
+  session   PracticeSession @relation(fields: [sessionId], references: [id])
+  sessionId String
+
+  pose   Pose   @relation(fields: [poseId], references: [id])
+  poseId String
+
+  orderInSession Int // where this pose occurred in that day’s practice
+  segment        SequenceSegment? // which chunk of the practice
+  side           Side? // helpful for asymmetrical poses
+  skipped        Boolean          @default(false) // did user skip this pose?
+
+  // Ratings – all optional so you can evolve this
+  ease      Int? // 1–10
+  comfort   Int? // 1–10
+  stability Int? // 1–10
+  pain      Int? // 1–10 (or invert scale)
+  breath    Int? // 1–10
+  focus     Int? // 1–10
+
+  overallScore Float? // can be computed from above factors & stored
+
+  notes String? // "felt pinch in low back on 3rd breath"
+
+  createdAt DateTime @default(now())
+
+  @@index([sessionId])
+  @@index([poseId])
+}
+
+enum SequenceSegment {
+  SUN_A
+  SUN_B
+  STANDING
+  PRIMARY
+  INTERMEDIATE
+  ADVANCED_A
+  ADVANCED_B
+  BACKBENDING
+  FINISHING
+}
+
+enum Side {
+  LEFT
+  RIGHT
+  BOTH
+  NA
 }
