@@ -2,7 +2,9 @@ import prisma from "../../lib/prisma";
 import jwt from 'jsonwebtoken'
 import bcrypt from "bcryptjs";
 import passport from "passport";
-import { Request, Response} from 'express';
+import { NextFunction, Request, Response } from 'express';
+import { User } from "@prisma/client";
+import { IVerifyOptions } from "passport-local";
 
 export const signup = async (req: Request, res: Response): Promise<void> => {
     const { name, email, password } = req.body;
@@ -41,9 +43,26 @@ export const signup = async (req: Request, res: Response): Promise<void> => {
     res.status(201).json({ newUser })
 }
 
+export const loginUser = (req: Request, res: Response, next: NextFunction): void => {
+    passport.authenticate('local', { session: false }, (err: Error, user: User, info: IVerifyOptions) => {
+        if (err) {
+            return next(err)
+        }
+        if (!user) {
+            return res.status(400).json({ error: info.message })
+        }
+
+        const payload = { userId: user.id }
+        const secret = process.env.JWT_SECRET as string
+        const token = jwt.sign(payload, secret, { expiresIn: '1h' })
+
+        res.json({ user, token })
+    }
+    )(req, res, next)
+}
+
 
 // Helper for me can delete later
-
 export const getAllUsers = async (req: Request, res: Response) => {
     const allUsers = await prisma.user.findMany(
 
