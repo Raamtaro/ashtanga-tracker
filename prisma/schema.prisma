@@ -47,7 +47,7 @@ model Profile {
 
 model Injury {
   id        String  @id @default(cuid())
-  profile   Profile @relation(fields: [profileId], references: [id])
+  profile   Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
   profileId String
 
   name     String // "Right hamstring", "Low back", etc
@@ -109,7 +109,7 @@ enum SequenceGroup {
 
 model PracticeSession {
   id     String @id @default(cuid())
-  user   User   @relation(fields: [userId], references: [id])
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
   userId String
 
   date            DateTime // date of practice (you can also store startTime if needed)
@@ -153,10 +153,10 @@ enum PracticeType {
 model ScoreCard {
   id String @id @default(cuid())
 
-  session   PracticeSession @relation(fields: [sessionId], references: [id])
+  session   PracticeSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   sessionId String
 
-  pose   Pose   @relation(fields: [poseId], references: [id])
+  pose   Pose   @relation(fields: [poseId], references: [id], onDelete: Cascade)
   poseId String
 
   orderInSession Int // where this pose occurred in that day’s practice
