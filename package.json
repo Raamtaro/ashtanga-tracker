@@ -8,7 +8,8 @@
     "build": "tsc",
     "start": "node --watch --experimental-specifier-resolution=node dist/index.js",
     "dev": "tsx --watch index.ts",
-    "seedPoses": "tsx --watch ./src/seed/seed.ts"
+    "seedPoses": "tsx ./src/seed/seed.ts",
+    "seed30days": "tsx ./src/seed/backfill30days.ts"
   },
   "keywords": [],
   "author": "",
