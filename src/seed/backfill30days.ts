@@ -5,6 +5,7 @@
 
 import { Prisma, SequenceGroup, SequenceSegment, PracticeType } from '@prisma/client';
 import prisma from '../lib/prisma';
+import { computeOverallScore } from '../lib/utils';
 
 // --- Config ---------------------------------------------------------------
 
@@ -46,31 +47,6 @@ function randNormInt(mean: number, sd: number, lo = 1, hi = 10) {
     const z = Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
     const val = Math.round(mean + sd * z);
     return clamp(val, lo, hi);
-}
-
-/** Compute overallScore: average of (ease, comfort, stability, breath, focus, invPain) */
-function computeOverallScore(sc: {
-    ease?: number | null;
-    comfort?: number | null;
-    stability?: number | null;
-    breath?: number | null;
-    focus?: number | null;
-    pain?: number | null;
-}) {
-    const parts: number[] = [];
-    if (sc.ease != null) parts.push(sc.ease);
-    if (sc.comfort != null) parts.push(sc.comfort);
-    if (sc.stability != null) parts.push(sc.stability);
-    if (sc.breath != null) parts.push(sc.breath);
-    if (sc.focus != null) parts.push(sc.focus);
-    if (sc.pain != null) {
-        // lower pain should boost overall; invert (1–10) → (10–1)
-        const invPain = 11 - sc.pain;
-        parts.push(invPain);
-    }
-    if (!parts.length) return null;
-    const avg = parts.reduce((a, b) => a + b, 0) / parts.length;
-    return Math.round(avg * 10) / 10; // 1 decimal
 }
 
 /** Map Pose.sequenceGroup → ScoreCard.segment; fix SUN A/B by name */

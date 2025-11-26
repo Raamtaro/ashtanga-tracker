@@ -302,6 +302,34 @@ export async function createPresetSession(req: Request, res: Response) {
     }
 }
 
+export async function getSessionById(req: Request, res: Response) {
+    try {
+        const { id } = req.params;
+        const session = await prisma.practiceSession.findUnique({
+            where: { id },
+            include: { scoreCards: { orderBy: { orderInSession: 'asc' } } },
+        });
+        if (!session) {
+            return res.status(404).json({ error: 'Session not found' });
+        }
+        res.json({ session });
+    } catch (err: any) {
+        res.status(400).json({ error: err?.message ?? 'Bad Request' });
+    }
+}
+
+export async function getAllSessions(req: Request, res: Response) {
+
+    const sessions = await prisma.practiceSession.findMany({
+        include: { scoreCards: { orderBy: { orderInSession: 'asc' } } },
+        orderBy: { date: 'desc' },
+    });
+
+    if (!sessions.length) return res.status(404).json({ message: "No sessions found." });
+    res.json({ sessions });
+
+}
+
 // POST /api/sessions/custom
 export async function createCustomSession(req: Request, res: Response) {
     try {
