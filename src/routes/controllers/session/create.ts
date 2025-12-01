@@ -1,10 +1,10 @@
-import prisma from "../../lib/prisma";
+import prisma from "../../../lib/prisma";
 import { SequenceSegment, PracticeType, Prisma } from "@prisma/client";
 import { Request, Response } from "express";
 import { z } from 'zod';
 
 // adjust to your actual path
-import { CATALOG, primaryOnly, intermediateOnly, advancedAOnly, advancedBOnly, type GroupKey } from '../../lib/sequenceDef';
+import { CATALOG, primaryOnly, intermediateOnly, advancedAOnly, advancedBOnly, type GroupKey } from '../../../lib/sequenceDef';
 
 /* --------------------------- Helpers & Types --------------------------- */
 
@@ -304,6 +304,7 @@ export async function createPresetSession(req: Request, res: Response) {
 
 export async function getSessionById(req: Request, res: Response) {
     try {
+        
         const { id } = req.params;
         const session = await prisma.practiceSession.findUnique({
             where: { id },
@@ -319,12 +320,25 @@ export async function getSessionById(req: Request, res: Response) {
 }
 
 export async function getAllSessions(req: Request, res: Response) {
+    // cast req.user to a shape that includes `id` (adjust to your auth user type)
+    const client = req.user as { id: string } | undefined;
+
+    if (!client?.id) {
+        return res.status(401).json({ message: "Unauthorized" });
+    }
 
     const sessions = await prisma.practiceSession.findMany({
-        include: { scoreCards: { orderBy: { orderInSession: 'asc' } } },
+        where: {
+            userId: client.id,
+        },
+        select: {
+            id: true,
+            userId: true,
+            date: true,
+        },
         orderBy: { date: 'desc' },
     });
-
+    console.log(sessions.length)
     if (!sessions.length) return res.status(404).json({ message: "No sessions found." });
     res.json({ sessions });
 

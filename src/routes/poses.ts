@@ -8,7 +8,7 @@ const router = Router();
 
 // router.get('/', passport.authenticate('jwt',{session: false}), getAllPoses); //Added authentication middleware for testing. Commenting out temporarily to make testing easier.
 router.get('/', getAllPoses); 
-router.get('/:id', getPoseById); //Get pose by id
-router.get('/:id/trend', trendPoseMetrics); //Trend pose metrics - to be implemented
+router.get('/:id', passport.authenticate('jwt',{session: false}), getPoseById); //Get pose by id
+router.get('/:id/trend', passport.authenticate('jwt',{session: false}), trendPoseMetrics); //Trend pose metrics - to be implemented
 
 export default router;
