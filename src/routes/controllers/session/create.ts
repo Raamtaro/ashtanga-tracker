@@ -302,48 +302,6 @@ export async function createPresetSession(req: Request, res: Response) {
     }
 }
 
-export async function getSessionById(req: Request, res: Response) {
-    try {
-        
-        const { id } = req.params;
-        const session = await prisma.practiceSession.findUnique({
-            where: { id },
-            include: { scoreCards: { orderBy: { orderInSession: 'asc' } } },
-        });
-        if (!session) {
-            return res.status(404).json({ error: 'Session not found' });
-        }
-        res.json({ session });
-    } catch (err: any) {
-        res.status(400).json({ error: err?.message ?? 'Bad Request' });
-    }
-}
-
-export async function getAllSessions(req: Request, res: Response) {
-    // cast req.user to a shape that includes `id` (adjust to your auth user type)
-    const client = req.user as { id: string } | undefined;
-
-    if (!client?.id) {
-        return res.status(401).json({ message: "Unauthorized" });
-    }
-
-    const sessions = await prisma.practiceSession.findMany({
-        where: {
-            userId: client.id,
-        },
-        select: {
-            id: true,
-            userId: true,
-            date: true,
-        },
-        orderBy: { date: 'desc' },
-    });
-    console.log(sessions.length)
-    if (!sessions.length) return res.status(404).json({ message: "No sessions found." });
-    res.json({ sessions });
-
-}
-
 // POST /api/sessions/custom
 export async function createCustomSession(req: Request, res: Response) {
     try {

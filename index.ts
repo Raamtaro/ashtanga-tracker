@@ -56,6 +56,7 @@ app.use(passport.session())
 app.use('/pose', routes.poses);
 app.use('/auth', routes.auth);
 app.use('/session', routes.session);
+app.use('/score-card', routes.scoreCard);
 
 app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
     console.error(err.stack);

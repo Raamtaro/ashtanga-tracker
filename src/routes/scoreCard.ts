@@ -1,11 +1,11 @@
 import Router from "express";
 import passport from "passport";
-import { updateScoreCard } from "./controllers/scoreCard";
+import { updateScoreCard,getScoreCardById } from "./controllers/scoreCard";
 
 
 const router = Router();
 
-
+router.get('/:id', passport.authenticate('jwt',{session: false}), getScoreCardById); //Get scoreCard by id
 router.patch('/:id', passport.authenticate('jwt',{session: false}), updateScoreCard); //Update scoreCard by id
 
 export default router;
