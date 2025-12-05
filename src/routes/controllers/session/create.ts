@@ -62,48 +62,37 @@ function sliceBySlug(names: string[], opts: { fromSlug?: string; upToSlug?: stri
 }
 
 // Pull Pose rows for all slugs we need (id + isTwoSided)
-async function fetchPosesBySlug(slugs: string[]) {
-    const rows = await prisma.pose.findMany({
+async function fetchPosesBySlug(tx: Prisma.TransactionClient, slugs: string[]) {
+    const rows = await tx.pose.findMany({
         where: { slug: { in: slugs } },
         select: { id: true, slug: true, isTwoSided: true },
     });
-    const map = new Map(rows.map((r) => [r.slug, r]));
-    const missing = slugs.filter((s) => !map.has(s));
-    if (missing.length) {
-        throw new Error(`Missing Pose(s) in DB for slugs: ${missing.join(', ')}`);
-    }
+    const map = new Map(rows.map(r => [r.slug, r]));
+    const missing = slugs.filter(s => !map.has(s));
+    if (missing.length) throw new Error(`Missing Pose(s) in DB for slugs: ${missing.join(', ')}`);
     return map;
 }
 
 /* --------------------------- Zod Schemas --------------------------- */
 
-// PRESET controller input
 const presetBodySchema = z.object({
-    date: z.string().datetime().optional(),
+    date: z.coerce.date().optional(),           // <- instead of string().datetime()
     label: z.string().optional(),
-    practiceType: z.nativeEnum(PracticeType).refine((v) => v !== 'CUSTOM', 'Use custom endpoint for CUSTOM'),
-    // optional partial cutoffs
-    halfPrimaryUpToSlug: z.string().optional(),      // default: 'navasana'
+    practiceType: z.nativeEnum(PracticeType).refine(v => v !== 'CUSTOM', 'Use custom endpoint for CUSTOM'),
+    halfPrimaryUpToSlug: z.string().optional(),
     intermediateUpToSlug: z.string().optional(),
-    // for INTERMEDIATE_PLUS_ADVANCED you can specify series & cutoff
     advancedSeries: z.enum(['A', 'B']).optional().default('A'),
     advancedUpToSlug: z.string().optional(),
 });
 
-// CUSTOM controller input
 const customBodySchema = z.object({
-    date: z.string().datetime().optional(),
+    date: z.coerce.date().optional(),
     label: z.string().optional(),
     practiceType: z.literal('CUSTOM'),
     blocks: z.array(z.object({
         group: z.enum(['PRIMARY_ONLY', 'INTERMEDIATE_ONLY', 'ADVANCED_A_ONLY', 'ADVANCED_B_ONLY'] as const),
-        // either a range or explicit slugs list
-        range: z.object({
-            fromSlug: z.string().optional(),
-            upToSlug: z.string().optional(),
-        }).optional(),
+        range: z.object({ fromSlug: z.string().optional(), upToSlug: z.string().optional() }).optional(),
         slugs: z.array(z.string()).optional(),
-        // optional segment override if you ever need it
         overrideSegment: z.nativeEnum(SequenceSegment).optional(),
     })),
 });
@@ -227,54 +216,47 @@ function expandCustomNames(input: z.infer<typeof customBodySchema>): PlanItem[] 
 /* --------------------------- Materialization --------------------------- */
 
 async function materializeSessionWithCards(params: {
+    tx: Prisma.TransactionClient;
     userId: string;
-    date?: string;
+    date?: Date;
     label?: string;
     practiceType: PracticeType;
     items: PlanItem[];
 }) {
-    return await prisma.$transaction(async (tx) => {
-        // 1) Create the PracticeSession (DRAFT)
-        const session = await tx.practiceSession.create({
-            data: {
-                userId: params.userId,
-                date: params.date ? new Date(params.date) : new Date(),
-                label: params.label,
-                practiceType: params.practiceType,
-                status: 'DRAFT',
-            },
-        });
+    const { tx } = params;
 
-        // 2) Fetch pose rows for all slugs
-        const uniqueSlugs = Array.from(new Set(params.items.map(i => i.slug)));
-        const poseMap = await fetchPosesBySlug(uniqueSlugs);
+    const session = await tx.practiceSession.create({
+        data: {
+            userId: params.userId,
+            date: params.date ?? new Date(),
+            label: params.label,
+            practiceType: params.practiceType,
+            status: 'DRAFT',
+        },
+    });
 
-        // 3) Build createMany payload (order + side split)
-        let order = 1;
-        const data: Prisma.ScoreCardCreateManyInput[] = [];
-        for (const it of params.items) {
-            const pose = poseMap.get(it.slug)!;
+    const uniqueSlugs = Array.from(new Set(params.items.map(i => i.slug)));
+    const poseMap = await fetchPosesBySlug(tx, uniqueSlugs);
 
-            if (pose.isTwoSided) {
-                data.push(
-                    { sessionId: session.id, poseId: pose.id, orderInSession: order++, segment: it.segment, side: 'RIGHT', skipped: false },
-                    { sessionId: session.id, poseId: pose.id, orderInSession: order++, segment: it.segment, side: 'LEFT', skipped: false },
-                );
-            } else {
-                data.push({ sessionId: session.id, poseId: pose.id, orderInSession: order++, segment: it.segment, side: 'NA', skipped: false });
-            }
+    let order = 1;
+    const data: Prisma.ScoreCardCreateManyInput[] = [];
+    for (const it of params.items) {
+        const pose = poseMap.get(it.slug)!;
+        if (pose.isTwoSided) {
+            data.push(
+                { sessionId: session.id, poseId: pose.id, orderInSession: order++, segment: it.segment, side: 'RIGHT', skipped: false },
+                { sessionId: session.id, poseId: pose.id, orderInSession: order++, segment: it.segment, side: 'LEFT', skipped: false },
+            );
+        } else {
+            data.push({ sessionId: session.id, poseId: pose.id, orderInSession: order++, segment: it.segment, side: 'NA', skipped: false });
         }
+    }
 
-        // 4) Insert all scorecards
-        await tx.scoreCard.createMany({ data });
+    await tx.scoreCard.createMany({ data });
 
-        // 5) Return session + cards
-        const withCards = await tx.practiceSession.findUnique({
-            where: { id: session.id },
-            include: { scoreCards: { orderBy: { orderInSession: 'asc' } } },
-        });
-
-        return withCards!;
+    return await tx.practiceSession.findUnique({
+        where: { id: session.id },
+        include: { scoreCards: { orderBy: { orderInSession: 'asc' } } },
     });
 }
 
@@ -284,16 +266,25 @@ async function materializeSessionWithCards(params: {
 export async function createPresetSession(req: Request, res: Response) {
     try {
         const body = presetBodySchema.parse(req.body);
-        const userId = (req as any).auth?.userId || (req as any).user?.id || req.body.userId; // adapt to your auth
-        if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+        // const userId = (req as any).auth?.userId || (req as any).user?.id || req.body.userId; // adapt to your auth
+        // if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+
+        const client = req.user as { id: string } | undefined;
+
+        if (!client?.id) {
+            return res.status(401).json({ message: "Unauthorized" });
+        }
 
         const items = expandPresetNames(body);
-        const session = await materializeSessionWithCards({
-            userId,
-            date: body.date,
-            label: body.label ?? humanizeLabelFromPreset(body),
-            practiceType: body.practiceType,
-            items,
+        const session = await prisma.$transaction(async (tx) => {
+            return await materializeSessionWithCards({
+                tx,
+                userId: client.id,
+                date: body.date,
+                label: body.label ?? humanizeLabelFromPreset(body),
+                practiceType: body.practiceType,
+                items,
+            });
         });
 
         res.status(201).json({ session });
@@ -306,17 +297,27 @@ export async function createPresetSession(req: Request, res: Response) {
 export async function createCustomSession(req: Request, res: Response) {
     try {
         const body = customBodySchema.parse(req.body);
-        const userId = (req as any).auth?.userId || (req as any).user?.id || req.body.userId;
-        if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+        // const userId = (req as any).auth?.userId || (req as any).user?.id || req.body.userId;
+        // if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+
+        const client = req.user as { id: string } | undefined;
+
+        if (!client?.id) {
+            return res.status(401).json({ message: "Unauthorized" });
+        }
 
         const items = expandCustomNames(body);
-        const session = await materializeSessionWithCards({
-            userId,
-            date: body.date,
-            label: body.label ?? 'Custom Practice',
-            practiceType: 'CUSTOM',
-            items,
+        const session = await prisma.$transaction(async (tx) => {
+            return await materializeSessionWithCards({
+                tx,
+                userId: client.id,
+                date: body.date,
+                label: body.label ?? 'Custom Practice',
+                practiceType: 'CUSTOM',
+                items,
+            });
         });
+
 
         res.status(201).json({ session });
     } catch (err: any) {

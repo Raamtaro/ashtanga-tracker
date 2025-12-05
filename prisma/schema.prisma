@@ -79,21 +79,6 @@ model Pose {
   scoreCards ScoreCard[]
 }
 
-// enum PoseCategory { // Redundant
-//   SUN_A
-//   SUN_B
-//   STANDING
-//   PRIMARY
-//   INTERMEDIATE
-//   ADVANCED_A
-//   ADVANCED_B
-//   ADVANCED_C
-//   ADVANCED_D
-//   FINISHING
-//   BACKBENDING
-//   OTHER
-// }
-
 enum SequenceGroup {
   WARMUP
   SUN_SALUTATIONS
@@ -130,6 +115,7 @@ model PracticeSession {
   updatedAt DateTime @updatedAt
 
   @@index([userId, date])
+  @@unique([id, userId])
 }
 
 enum Status {
