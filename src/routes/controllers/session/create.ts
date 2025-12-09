@@ -78,7 +78,7 @@ async function fetchPosesBySlug(tx: Prisma.TransactionClient, slugs: string[]) {
 const presetBodySchema = z.object({
     date: z.coerce.date().optional(),           // <- instead of string().datetime()
     label: z.string().optional(),
-    practiceType: z.nativeEnum(PracticeType).refine(v => v !== 'CUSTOM', 'Use custom endpoint for CUSTOM'),
+    practiceType: z.enum(PracticeType).refine(v => v !== 'CUSTOM', 'Use custom endpoint for CUSTOM'),
     halfPrimaryUpToSlug: z.string().optional(),
     intermediateUpToSlug: z.string().optional(),
     advancedSeries: z.enum(['A', 'B']).optional().default('A'),
@@ -93,7 +93,7 @@ const customBodySchema = z.object({
         group: z.enum(['PRIMARY_ONLY', 'INTERMEDIATE_ONLY', 'ADVANCED_A_ONLY', 'ADVANCED_B_ONLY'] as const),
         range: z.object({ fromSlug: z.string().optional(), upToSlug: z.string().optional() }).optional(),
         slugs: z.array(z.string()).optional(),
-        overrideSegment: z.nativeEnum(SequenceSegment).optional(),
+        overrideSegment: z.enum(SequenceSegment).optional(),
     })),
 });
 

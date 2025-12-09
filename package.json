@@ -9,7 +9,8 @@
     "start": "node --watch --experimental-specifier-resolution=node dist/index.js",
     "dev": "tsx --watch index.ts",
     "seedPoses": "tsx ./src/seed/seed.ts",
-    "seed30days": "tsx ./src/seed/backfill30days.ts"
+    "seed30days": "tsx ./src/seed/backfill30days.ts",
+    "clearSessions": "tsx ./src/seed/clearSessions.ts"
   },
   "keywords": [],
   "author": "",

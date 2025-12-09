@@ -38,7 +38,7 @@ export const getAllPoses = async (req: Request, res: Response) => {
     const allPoses = await prisma.pose.findMany(
         {
             select: {
-                id: true,
+                // id: true,
                 sanskritName: true,
                 sequenceGroup: true
             }
