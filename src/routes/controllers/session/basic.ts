@@ -15,9 +15,28 @@ const sessionsQuerySchema = z.object({
 
 // GET /poses?segment=PRIMARY (optional)
 const posesQuerySchema = z.object({
-  segment: z.enum(SequenceGroup).optional(),
+    segment: z.enum(SequenceGroup).optional(),
 });
 
+/** Query: /session?limit=20&cursor=<token> */
+const qSchema = z.object({
+    limit: z.coerce.number().int().positive().max(100).default(20),
+    cursor: z.string().optional(), // base64url token
+});
+
+type CursorPayload = { d: string; id: string }; // d = ISO date string of last item
+
+function encodeCursor(p: CursorPayload) {
+    return Buffer.from(JSON.stringify(p)).toString('base64url');
+}
+function decodeCursor(s: string | undefined): CursorPayload | undefined {
+    if (!s) return undefined;
+    try {
+        return JSON.parse(Buffer.from(s, 'base64url').toString('utf8')) as CursorPayload;
+    } catch {
+        return undefined;
+    }
+}
 
 export const getSessionById = async (req: Request, res: Response) => {
     const client = req.user as { id: string } | undefined;
@@ -41,27 +60,50 @@ export const getSessionById = async (req: Request, res: Response) => {
 
 }
 
-export const getAllSessions = async (req: Request, res: Response) => {
+export async function getAllSessions(req: Request, res: Response) {
     const client = req.user as { id: string } | undefined;
+    if (!client?.id) return res.status(401).json({ message: 'Unauthorized' });
 
-    if (!client?.id) {
-        return res.status(401).json({ message: "Unauthorized" });
+    const { limit, cursor } = qSchema.parse(req.query);
+    const cur = decodeCursor(cursor);
+
+    // Stable ordering + keyset window
+    const where: Prisma.PracticeSessionWhereInput = { userId: client.id };
+    if (cur) {
+        const d = new Date(cur.d);
+        // everything strictly "after" our cursor in (date desc, id desc) order:
+        // i.e. rows with date < d, OR same date and id < cursor.id
+        where.OR = [
+            { date: { lt: d } },
+            { AND: [{ date: d }, { id: { lt: cur.id } }] },
+        ];
     }
 
-    const sessions = await prisma.practiceSession.findMany({
-        where: {
-            userId: client.id,
-        },
+    const rows = await prisma.practiceSession.findMany({
+        where,
+        orderBy: [{ date: 'desc' }, { id: 'desc' }], // tie-breaker for stability
+        take: limit + 1, // overfetch to detect next page
         select: {
             id: true,
-            userId: true,
             date: true,
+            label: true,
+            status: true,
+            overallScore: true,
+            energyLevel: true,
+            mood: true,
         },
-        orderBy: { date: 'desc' },
     });
-    console.log(sessions.length)
-    if (!sessions.length) return res.status(404).json({ message: "No sessions found." });
-    res.json({ sessions });
+
+    const hasMore = rows.length > limit;
+    const items = hasMore ? rows.slice(0, limit) : rows;
+    const last = items[items.length - 1];
+
+    const nextCursor = hasMore
+        ? encodeCursor({ d: last.date.toISOString(), id: last.id })
+        : null;
+
+    // Shape your FE expects
+    res.json({ items, nextCursor });
 }
 
 export const publishSession = async (req: Request, res: Response) => {
@@ -106,62 +148,62 @@ export const publishSession = async (req: Request, res: Response) => {
 
 
 export async function listPosesBySegment(req: Request, res: Response) {
-  try {
-    const q = posesQuerySchema.parse(req.query);
-    const where = q.segment ? { sequenceGroup: q.segment } : {};
-    const poses = await prisma.pose.findMany({
-      where,
-      orderBy: [{ sequenceGroup: 'asc' }, { orderInGroup: 'asc' }, { sanskritName: 'asc' }],
-      select: { id: true, slug: true, sanskritName: true, englishName: true, sequenceGroup: true, isTwoSided: true, orderInGroup: true },
-    });
-    res.json({ count: poses.length, poses });
-  } catch (err: any) {
-    res.status(400).json({ error: err?.message ?? 'Bad Request' });
-  }
+    try {
+        const q = posesQuerySchema.parse(req.query);
+        const where = q.segment ? { sequenceGroup: q.segment } : {};
+        const poses = await prisma.pose.findMany({
+            where,
+            orderBy: [{ sequenceGroup: 'asc' }, { orderInGroup: 'asc' }, { sanskritName: 'asc' }],
+            select: { id: true, slug: true, sanskritName: true, englishName: true, sequenceGroup: true, isTwoSided: true, orderInGroup: true },
+        });
+        res.json({ count: poses.length, poses });
+    } catch (err: any) {
+        res.status(400).json({ error: err?.message ?? 'Bad Request' });
+    }
 }
 
 
 
 export async function listSessions(req: Request, res: Response) {
-  try {
-    const client = req.user as { id: string } | undefined;
-    if (!client?.id) return res.status(401).json({ message: 'Unauthorized' });
+    try {
+        const client = req.user as { id: string } | undefined;
+        if (!client?.id) return res.status(401).json({ message: 'Unauthorized' });
 
-    const q = sessionsQuerySchema.parse(req.query);
-    const skip = (q.page - 1) * q.limit;
+        const q = sessionsQuerySchema.parse(req.query);
+        const skip = (q.page - 1) * q.limit;
 
-    const where: Prisma.PracticeSessionWhereInput = {
-      userId: client.id,
-      ...(q.status ? { status: q.status } : {}),
-      ...(q.from || q.to
-        ? { date: { ...(q.from ? { gte: q.from } : {}), ...(q.to ? { lte: q.to } : {}) } }
-        : {}),
-    };
+        const where: Prisma.PracticeSessionWhereInput = {
+            userId: client.id,
+            ...(q.status ? { status: q.status } : {}),
+            ...(q.from || q.to
+                ? { date: { ...(q.from ? { gte: q.from } : {}), ...(q.to ? { lte: q.to } : {}) } }
+                : {}),
+        };
 
-    const [total, sessions] = await Promise.all([
-      prisma.practiceSession.count({ where }),
-      prisma.practiceSession.findMany({
-        where,
-        orderBy: [{ date: 'desc' }, { createdAt: 'desc' }],
-        skip,
-        take: q.limit,
-        select: {
-          id: true, date: true, label: true, practiceType: true, status: true, overallScore: true,
-          scoreCards: { select: { id: true }, take: 1 }, // light check for presence
-        },
-      }),
-    ]);
+        const [total, sessions] = await Promise.all([
+            prisma.practiceSession.count({ where }),
+            prisma.practiceSession.findMany({
+                where,
+                orderBy: [{ date: 'desc' }, { createdAt: 'desc' }],
+                skip,
+                take: q.limit,
+                select: {
+                    id: true, date: true, label: true, practiceType: true, status: true, overallScore: true,
+                    scoreCards: { select: { id: true }, take: 1 }, // light check for presence
+                },
+            }),
+        ]);
 
-    res.json({
-      meta: {
-        total,
-        page: q.page,
-        limit: q.limit,
-        pages: Math.ceil(total / q.limit),
-      },
-      sessions,
-    });
-  } catch (err: any) {
-    res.status(400).json({ error: err?.message ?? 'Bad Request' });
-  }
+        res.json({
+            meta: {
+                total,
+                page: q.page,
+                limit: q.limit,
+                pages: Math.ceil(total / q.limit),
+            },
+            sessions,
+        });
+    } catch (err: any) {
+        res.status(400).json({ error: err?.message ?? 'Bad Request' });
+    }
 }
