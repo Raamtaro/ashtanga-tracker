@@ -39,8 +39,10 @@ export const getAllPoses = async (req: Request, res: Response) => {
         {
             select: {
                 // id: true,
-                sanskritName: true,
-                sequenceGroup: true
+                // sanskritName: true,
+                sequenceGroup: true,
+                orderInGroup: true,
+                slug: true
             }
         }
     )

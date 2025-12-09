@@ -63,7 +63,7 @@ const presetBodySchema = z.object(
     {
         date: z.coerce.date().optional(), // if not provided, will default to current date
         label: z.string().optional(),
-        duration: z.number().min(1).optional(), 
+        duration: z.number().min(1).optional(),
         practiceType: z.enum(PracticeType)
     }
 )
@@ -72,8 +72,8 @@ const customBodySchema = z.object(
     {
         date: z.coerce.date().optional(), // if not provided, will default to current date
         label: z.string().optional(), // will add some logic for this to default to the combination of segments - i.e. Primary + Partial (Intermediate | Advanced (A | B) )
-        duration: z.number().min(1).optional(),   
-        practiceType: z.literal(PracticeType.CUSTOM), 
+        duration: z.number().min(1).optional(),
+        practiceType: z.literal(PracticeType.CUSTOM),
         sequenceSnippets: z.array(
             z.object(
                 {
@@ -81,6 +81,32 @@ const customBodySchema = z.object(
                     upToSlug: z.string()
                 }
             )
-        )     
+        )
     }
 )
+
+
+
+export const createPresetSession = async (req: Request, res: Response) => {
+    const client = req.user as { id: string } | undefined;
+    if (!client?.id) {
+        return res.status(401).json({ message: "Unauthorized" });
+    }
+
+    const body = presetBodySchema.parse(req.body);
+
+    //1. Determine which poses to include based on practiceType
+    //2. Prisma Transaction to create a PracticeSession and ScoreCards for each pose that is being practiced.
+}
+
+export const createCustomSession = async (req: Request, res: Response) => {
+    const client = req.user as { id: string } | undefined;
+    if (!client?.id) {
+        return res.status(401).json({ message: "Unauthorized" });
+    }
+
+    const body = customBodySchema.parse(req.body);
+
+    //1. Determine which poses to include based on practiceType
+    //2. Prisma Transaction to create a PracticeSession and ScoreCards for each pose that is being practiced.
+}
