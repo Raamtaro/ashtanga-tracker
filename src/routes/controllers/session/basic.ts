@@ -51,7 +51,16 @@ export const getSessionById = async (req: Request, res: Response) => {
             id: id,
             userId: client.id
         },
-        include: { scoreCards: { orderBy: { orderInSession: 'asc' } } },
+        include: { 
+            scoreCards: { 
+                orderBy: { orderInSession: 'asc' },
+                include: { pose: {
+                    select: {
+                        slug: true
+                    }
+                }}
+            } 
+        },
     });
     if (!session) {
         return res.status(404).json({ error: 'Session not found' });

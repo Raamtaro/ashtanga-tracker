@@ -1,5 +1,5 @@
 import prisma from "../../lib/prisma";
-import { Prisma } from "@prisma/client";
+import { Prisma, SequenceGroup } from "@prisma/client";
 import { Request, Response } from "express";
 import { z } from "zod";
 import { ALLOWED_METRICS, type AllowedMetric, type PoseTrendResponse, type TrendPoint } from "../../types/trend";
@@ -18,6 +18,10 @@ const querySchema = z.object({
     from: z.coerce.date().optional(),
     to: z.coerce.date().optional(),
 }).refine((q) => (q.from && q.to ? q.from <= q.to : true), { message: "`from` must be <= `to`" });
+
+const posesQuerySchema = z.object({
+    segment: z.enum(SequenceGroup).optional(),
+});
 
 function normalizeFromTo(qFrom?: Date, qTo?: Date) {
     let from: Date | undefined;
@@ -52,6 +56,21 @@ export const getAllPoses = async (req: Request, res: Response) => {
     }
 
     res.json(allPoses);
+}
+
+export async function listPosesBySegment(req: Request, res: Response) {
+    try {
+        const q = posesQuerySchema.parse(req.query);
+        const where = q.segment ? { sequenceGroup: q.segment } : {};
+        const poses = await prisma.pose.findMany({
+            where,
+            orderBy: [{ sequenceGroup: 'asc' }, { orderInGroup: 'asc' }, { sanskritName: 'asc' }],
+            select: { id: true, slug: true, sanskritName: true, englishName: true, sequenceGroup: true, isTwoSided: true, orderInGroup: true },
+        });
+        res.json({ count: poses.length, poses });
+    } catch (err: any) {
+        res.status(400).json({ error: err?.message ?? 'Bad Request' });
+    }
 }
 
 
