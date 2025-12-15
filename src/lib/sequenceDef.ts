@@ -106,8 +106,8 @@ export const primaryOnly: SequenceGroup = [
 ];
 
 export const intermediateOnly: SequenceGroup = [
-    S('Pasasana'),
-    S('Krounchasana'),
+    LR('Pasasana'),
+    LR('Krounchasana'),
     S('Shalabhasana A'),
     S('Shalabhasana B'),
     S('Bhekasana'),
