@@ -10,7 +10,8 @@
     "dev": "tsx --watch index.ts",
     "seedPoses": "tsx ./src/seed/seed.ts",
     "seed30days": "tsx ./src/seed/backfill30days.ts",
-    "clearSessions": "tsx ./src/seed/clearSessions.ts"
+    "clearSessions": "tsx ./src/seed/clearSessions.ts",
+    "clearPoses": "tsx ./src/seed/clearPoseData.ts"
   },
   "keywords": [],
   "author": "",
