@@ -270,6 +270,11 @@ async function buildSessionWithScoreCards(
     return await tx.practiceSession.findUnique({
         where: { id: session.id },
         select: { 
+            id: true,
+            date: true,
+            label: true,
+            practiceType: true,
+            durationMinutes: true,
             scoreCards: { 
                 orderBy: { orderInSession: 'asc' },
                 select: {
@@ -282,7 +287,6 @@ async function buildSessionWithScoreCards(
                         }
                     }
                 },
-
             } 
         },
     });
@@ -311,7 +315,8 @@ export const createPresetSession = async (req: Request, res: Response) => {
                     date: body.date,
                     label: body.label,
                     practiceType: body.practiceType,
-                    items: planItems
+                    items: planItems,
+                    duration: body.duration
                 }
             )
         }
@@ -345,7 +350,8 @@ export const createCustomSession = async (req: Request, res: Response) => {
                     date: body.date,
                     label: body.label,
                     practiceType: body.practiceType,
-                    items: planItems
+                    items: planItems,
+                    duration: body.duration
                 }
             )
         }
