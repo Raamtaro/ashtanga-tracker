@@ -5,6 +5,7 @@ import { z } from "zod";
 import { ALLOWED_METRICS, type AllowedMetric, type PoseTrendResponse, type TrendPoint } from "../../types/trend";
 
 
+const SEQUENCE_GROUPS = Object.values(SequenceGroup) as [SequenceGroup, ...SequenceGroup[]];
 const querySchema = z.object({
     fields: z.string().optional().transform((s) =>
         s ? s.split(",").map((x) => x.trim().toLowerCase()).filter(Boolean) : undefined
@@ -19,8 +20,16 @@ const querySchema = z.object({
     to: z.coerce.date().optional(),
 }).refine((q) => (q.from && q.to ? q.from <= q.to : true), { message: "`from` must be <= `to`" });
 
+
 const posesQuerySchema = z.object({
-    segment: z.enum(SequenceGroup).optional(),
+    segment: z.preprocess((v) => {
+        if (v == null) return undefined;
+        if (Array.isArray(v)) return v; // supports ?segment=A&segment=B
+        return String(v)
+            .split(',')
+            .map((s) => s.trim())
+            .filter(Boolean);
+    }, z.array(z.enum(SEQUENCE_GROUPS)).optional()),
 });
 
 function normalizeFromTo(qFrom?: Date, qTo?: Date) {
@@ -61,12 +70,18 @@ export const getAllPoses = async (req: Request, res: Response) => {
 export async function listPosesBySegment(req: Request, res: Response) {
     try {
         const q = posesQuerySchema.parse(req.query);
-        const where = q.segment ? { sequenceGroup: q.segment } : {};
+
+        const where =
+            q.segment?.length
+                ? { sequenceGroup: { in: q.segment } }
+                : {};
+
         const poses = await prisma.pose.findMany({
             where,
             orderBy: [{ sequenceGroup: 'asc' }, { orderInGroup: 'asc' }, { sanskritName: 'asc' }],
-            select: { id: true, slug: true, sanskritName: true, englishName: true, sequenceGroup: true, isTwoSided: true, orderInGroup: true },
+            select: { slug: true, sanskritName: true, englishName: true, sequenceGroup: true },
         });
+
         res.json({ count: poses.length, poses });
     } catch (err: any) {
         res.status(400).json({ error: err?.message ?? 'Bad Request' });

@@ -51,16 +51,33 @@ export const getSessionById = async (req: Request, res: Response) => {
             id: id,
             userId: client.id
         },
-        include: { 
-            scoreCards: { 
+        // include: { 
+        //     scoreCards: { 
+        //         orderBy: { orderInSession: 'asc' },
+        //         include: { pose: {
+        //             select: {
+        //                 slug: true
+        //             }
+        //         }}
+        //     } 
+        // },
+        select: {
+            // id: true,
+            scoreCards: {
                 orderBy: { orderInSession: 'asc' },
-                include: { pose: {
-                    select: {
-                        slug: true
+                select: {
+                    id: true,
+                    side: true,
+                    overallScore: true,
+                    pose: {
+                        select: {
+                            sanskritName: true,
+                            sequenceGroup: true,
+                        }
                     }
-                }}
-            } 
-        },
+                }
+            }
+        }
     });
     if (!session) {
         return res.status(404).json({ error: 'Session not found' });
@@ -171,49 +188,3 @@ export async function listPosesBySegment(req: Request, res: Response) {
         res.status(400).json({ error: err?.message ?? 'Bad Request' });
     }
 }
-
-
-
-// export async function listSessions(req: Request, res: Response) {
-//     try {
-//         const client = req.user as { id: string } | undefined;
-//         if (!client?.id) return res.status(401).json({ message: 'Unauthorized' });
-
-//         const q = sessionsQuerySchema.parse(req.query);
-//         const skip = (q.page - 1) * q.limit;
-
-//         const where: Prisma.PracticeSessionWhereInput = {
-//             userId: client.id,
-//             ...(q.status ? { status: q.status } : {}),
-//             ...(q.from || q.to
-//                 ? { date: { ...(q.from ? { gte: q.from } : {}), ...(q.to ? { lte: q.to } : {}) } }
-//                 : {}),
-//         };
-
-//         const [total, sessions] = await Promise.all([
-//             prisma.practiceSession.count({ where }),
-//             prisma.practiceSession.findMany({
-//                 where,
-//                 orderBy: [{ date: 'desc' }, { createdAt: 'desc' }],
-//                 skip,
-//                 take: q.limit,
-//                 select: {
-//                     id: true, date: true, label: true, practiceType: true, status: true, overallScore: true,
-//                     scoreCards: { select: { id: true }, take: 1 }, // light check for presence
-//                 },
-//             }),
-//         ]);
-
-//         res.json({
-//             meta: {
-//                 total,
-//                 page: q.page,
-//                 limit: q.limit,
-//                 pages: Math.ceil(total / q.limit),
-//             },
-//             sessions,
-//         });
-//     } catch (err: any) {
-//         res.status(400).json({ error: err?.message ?? 'Bad Request' });
-//     }
-// }
