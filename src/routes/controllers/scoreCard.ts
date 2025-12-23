@@ -139,9 +139,15 @@ export const getScoreCardById = async (req: Request, res: Response) => {
                 }
             },
             select: {
+
                 id: true, sessionId: true, segment: true, side: true, skipped: true, notes: true,
                 ease: true, comfort: true, stability: true, pain: true, breath: true, focus: true,
                 overallScore: true,
+                pose: {
+                    select: {
+                        sanskritName: true
+                    }
+                }
             }
         }
     )

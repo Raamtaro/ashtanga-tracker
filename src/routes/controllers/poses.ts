@@ -109,15 +109,17 @@ export const getPoseById = async (req: Request, res: Response) => { //This will 
 }
 
 export const trendPoseMetrics = async (req: Request, res: Response) => {
+    const client = req.user as { id: string } | undefined;
+    if (!client?.id) return res.status(401).json({ message: "Unauthorized" });
+    const { id } = req.params;
+    const q = querySchema.parse(req.query);
+    // metrics to return
+    const metrics: AllowedMetric[] = (q.fields as AllowedMetric[] | undefined) ?? [...ALLOWED_METRICS];
+
+    // time window
+    let { from, to } = normalizeFromTo(q.from, q.to);
     try {
-        const { id } = req.params;
-        const q = querySchema.parse(req.query);
 
-        // metrics to return
-        const metrics: AllowedMetric[] = (q.fields as AllowedMetric[] | undefined) ?? [...ALLOWED_METRICS];
-
-        // time window
-        let { from, to } = normalizeFromTo(q.from, q.to);
         if (!from && !to && q.days !== "all") {
             const end = new Date(); // now
             const start = new Date(end.getTime() - q.days * 24 * 60 * 60 * 1000);
@@ -137,7 +139,9 @@ export const trendPoseMetrics = async (req: Request, res: Response) => {
         let sessionIds: string[] | undefined;
         if (from || to) {
             const sessions = await prisma.practiceSession.findMany({
+
                 where: {
+                    userId: client.id,
                     ...(from ? { date: { gte: from } } : {}),
                     ...(to ? { date: { lt: to } } : {}), // exclusive upper bound
                 },
@@ -161,7 +165,11 @@ export const trendPoseMetrics = async (req: Request, res: Response) => {
         // build scalar-only where for scorecards
         const where: Prisma.ScoreCardWhereInput = {
             poseId: id,
-            ...(sessionIds ? { sessionId: { in: sessionIds } } : {}),
+            session: {
+                userId: client.id,
+                ...(from ? { date: { gte: from } } : {}),
+                ...(to ? { date: { lt: to } } : {}),
+            },
             ...(q.includeSkipped ? {} : { skipped: false }),
             ...(q.side && q.side !== "ALL"
                 ? { side: q.side === "BOTH" ? { in: ["LEFT", "RIGHT"] } : q.side }
