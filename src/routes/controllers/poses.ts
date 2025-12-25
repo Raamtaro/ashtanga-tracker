@@ -51,7 +51,7 @@ export const getAllPoses = async (req: Request, res: Response) => {
     const allPoses = await prisma.pose.findMany(
         {
             select: {
-                // id: true,
+                id: true,
                 // sanskritName: true,
                 sequenceGroup: true,
                 orderInGroup: true,
@@ -111,19 +111,21 @@ export const getPoseById = async (req: Request, res: Response) => { //This will 
 export const trendPoseMetrics = async (req: Request, res: Response) => {
     const client = req.user as { id: string } | undefined;
     if (!client?.id) return res.status(401).json({ message: "Unauthorized" });
-    const { id } = req.params;
-    const q = querySchema.parse(req.query);
-    // metrics to return
-    const metrics: AllowedMetric[] = (q.fields as AllowedMetric[] | undefined) ?? [...ALLOWED_METRICS];
 
-    // time window
-    let { from, to } = normalizeFromTo(q.from, q.to);
     try {
+        const { id } = req.params;
+        const q = querySchema.parse(req.query);
+
+        // metrics
+        const metrics: AllowedMetric[] =
+            (q.fields as AllowedMetric[] | undefined) ?? [...ALLOWED_METRICS];
+
+        // window
+        let { from, to } = normalizeFromTo(q.from, q.to);
 
         if (!from && !to && q.days !== "all") {
-            const end = new Date(); // now
+            const end = new Date();
             const start = new Date(end.getTime() - q.days * 24 * 60 * 60 * 1000);
-            // use created window directly (no normalize — it already has time)
             from = start;
             to = end;
         }
@@ -135,34 +137,7 @@ export const trendPoseMetrics = async (req: Request, res: Response) => {
         });
         if (!pose) return res.status(404).json({ message: "Pose not found." });
 
-        // resolve sessionIds inside window (scalar filter, cannot be ignored)
-        let sessionIds: string[] | undefined;
-        if (from || to) {
-            const sessions = await prisma.practiceSession.findMany({
-
-                where: {
-                    userId: client.id,
-                    ...(from ? { date: { gte: from } } : {}),
-                    ...(to ? { date: { lt: to } } : {}), // exclusive upper bound
-                },
-                select: { id: true, date: true },
-                orderBy: { date: "asc" },
-            });
-            sessionIds = sessions.map(s => s.id);
-
-            // If nothing in window → return empty points fast
-            if (!sessionIds.length) {
-                const resp: PoseTrendResponse = {
-                    pose,
-                    metrics,
-                    window: { from: from?.toISOString(), to: to?.toISOString() },
-                    points: [],
-                };
-                return res.json(resp);
-            }
-        }
-
-        // build scalar-only where for scorecards
+        // where
         const where: Prisma.ScoreCardWhereInput = {
             poseId: id,
             session: {
@@ -176,7 +151,7 @@ export const trendPoseMetrics = async (req: Request, res: Response) => {
                 : {}),
         };
 
-        // dynamic select for requested metrics
+        // select only requested metrics
         const metricSelect = Object.fromEntries(metrics.map((m) => [m, true])) as Pick<
             Prisma.ScoreCardSelect,
             AllowedMetric
@@ -197,15 +172,7 @@ export const trendPoseMetrics = async (req: Request, res: Response) => {
             orderBy: [{ session: { date: "asc" } }, { orderInSession: "asc" }],
         });
 
-        // last-ditch safety: filter by window in memory too (should be no-ops if DB filtered correctly)
-        const filtered = (from || to)
-            ? cards.filter(c => {
-                const d = c.session!.date;
-                return (!from || d >= from) && (!to || d < to);
-            })
-            : cards;
-
-        const points: TrendPoint[] = filtered.map((c) => ({
+        const points: TrendPoint[] = cards.map((c) => ({
             scoreCardId: c.id,
             sessionDate: c.session!.date.toISOString(),
             createdAt: c.createdAt.toISOString(),
@@ -213,17 +180,18 @@ export const trendPoseMetrics = async (req: Request, res: Response) => {
             segment: c.segment ?? null,
             orderInSession: c.orderInSession,
             skipped: c.skipped,
-            values: Object.fromEntries(metrics.map((m) => [m, (c as any)[m] ?? null])) as TrendPoint["values"],
+            values: Object.fromEntries(
+                metrics.map((m) => [m, (c as any)[m] ?? null])
+            ) as TrendPoint["values"],
         }));
 
-        const resp: PoseTrendResponse = {
+        return res.json({
             pose,
             metrics,
             window: { from: from?.toISOString(), to: to?.toISOString() },
             points,
-        };
-        res.json(resp);
+        } satisfies PoseTrendResponse);
     } catch (err: any) {
-        res.status(400).json({ error: err?.message ?? "Bad Request" });
+        return res.status(400).json({ error: err?.message ?? "Bad Request" });
     }
 };

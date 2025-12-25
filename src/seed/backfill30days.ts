@@ -3,22 +3,24 @@
  * Run with:  tsx scripts/backfill30Days.ts
  */
 
-import { Prisma, SequenceGroup, SequenceSegment, PracticeType } from '@prisma/client';
-import prisma from '../lib/prisma';
-import { computeOverallScore } from '../lib/utils';
+import { Prisma, SequenceGroup, SequenceSegment, PracticeType, Side, Status } from "@prisma/client";
+import prisma from "../lib/prisma";
 
 // --- Config ---------------------------------------------------------------
 
-const DAYS = 30;
-const USER_ID = process.env.USER_ID ?? undefined;   // or set USER_EMAIL
-console.log('Using USER_ID:', USER_ID);
+const DAYS = Number(process.env.DAYS ?? 30);
+
+const USER_ID = process.env.USER_ID ?? undefined; // or set USER_EMAIL
 const USER_EMAIL = process.env.USER_EMAIL ?? undefined;
 
 // bias knobs (tweak to taste)
-const GOOD_DAY_PROB = 0.55;     // chance that it's a "good" day
+const GOOD_DAY_PROB = 0.55; // chance that it's a "good" day
 const BASE_DURATION_MIN = [60, 75, 90, 105, 120]; // pick one
 const SUN_A_REPS = 5;
 const SUN_B_REPS = 3;
+
+// If true, deletes any sessions for that user in the date window first
+const WIPE_WINDOW = (process.env.WIPE_WINDOW ?? "true").toLowerCase() === "true";
 
 // --- Utilities ------------------------------------------------------------
 
@@ -41,7 +43,8 @@ const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, n
 /** Return a value ~ N(mean, sd) clipped to [lo, hi], rounded to int */
 function randNormInt(mean: number, sd: number, lo = 1, hi = 10) {
     // Box–Muller
-    let u = 0, v = 0;
+    let u = 0,
+        v = 0;
     while (u === 0) u = Math.random();
     while (v === 0) v = Math.random();
     const z = Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
@@ -49,132 +52,160 @@ function randNormInt(mean: number, sd: number, lo = 1, hi = 10) {
     return clamp(val, lo, hi);
 }
 
-/** Map Pose.sequenceGroup → ScoreCard.segment; fix SUN A/B by name */
+/** Your current backend computeOverall is a straight average — keep this aligned. */
+function computeOverallScore(metrics: {
+    ease?: number | null;
+    comfort?: number | null;
+    stability?: number | null;
+    pain?: number | null;
+    breath?: number | null;
+    focus?: number | null;
+    skipped?: boolean;
+}): number | null {
+    if (metrics.skipped) return null;
+    const vals = [metrics.ease, metrics.comfort, metrics.stability, metrics.pain, metrics.breath, metrics.focus].filter(
+        (v): v is number => typeof v === "number"
+    );
+    if (!vals.length) return null;
+    const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
+    return Math.round(avg * 100) / 100;
+}
+
+/** Map Pose.sequenceGroup → ScoreCard.segment; special-case SUN A/B by name */
 function segmentForPose(sequenceGroup: SequenceGroup, poseName: string): SequenceSegment {
-    if (sequenceGroup === 'SUN_SALUTATIONS') {
-        return /surya\s+namaskar\s+b/i.test(poseName) ? 'SUN_B' : 'SUN_A';
+    if (sequenceGroup === "SUN_SALUTATIONS") {
+        return /surya\s+namaskar\s+b/i.test(poseName) ? "SUN_B" : "SUN_A";
     }
     switch (sequenceGroup) {
-        case 'STANDING': return 'STANDING';
-        case 'PRIMARY': return 'PRIMARY';
-        case 'INTERMEDIATE': return 'INTERMEDIATE';
-        case 'ADVANCED_A': return 'ADVANCED_A';
-        case 'ADVANCED_B': return 'ADVANCED_B';
-        case 'BACKBENDING': return 'BACKBENDING';
-        case 'FINISHING': return 'FINISHING';
-        default: return 'STANDING';
+        case "STANDING":
+            return "STANDING";
+        case "PRIMARY":
+            return "PRIMARY";
+        case "INTERMEDIATE":
+            return "INTERMEDIATE";
+        case "ADVANCED_A":
+            return "ADVANCED_A";
+        case "ADVANCED_B":
+            return "ADVANCED_B";
+        case "BACKBENDING":
+            return "BACKBENDING";
+        case "FINISHING":
+            return "FINISHING";
+        default:
+            return "STANDING";
     }
 }
 
-/** Picks a practiceType and mid-block selection pattern */
-type MidPlan = {
-    practiceType: PracticeType;
-    label: string;
-    groups: { key: SequenceGroup; count?: number; uptoIndex?: number }[]; // count/uptoIndex for partials
+/** Force canonical flow ordering (don’t rely on enum sort). */
+const GROUP_FLOW_ORDER: Record<SequenceGroup, number> = {
+    WARMUP: 0,
+    SUN_SALUTATIONS: 1,
+    STANDING: 2,
+    PRIMARY: 3,
+    INTERMEDIATE: 4,
+    ADVANCED_A: 5,
+    ADVANCED_B: 6,
+    BACKBENDING: 7,
+    FINISHING: 8,
+    OTHER: 9,
 };
 
-function randomMidPlan(primary: any[], intermediate: any[], advA: any[], advB: any[]): MidPlan {
-    // weights by “typicality”
-    const options: (() => MidPlan)[] = [
-        () => ({
-            practiceType: 'FULL_PRIMARY',
-            label: 'Full Primary',
-            groups: [{ key: 'PRIMARY' }],
-        }),
-        () => ({
-            practiceType: 'HALF_PRIMARY',
-            label: 'Half Primary',
-            groups: [{ key: 'PRIMARY', uptoIndex: Math.max(5, randInt(8, Math.max(8, primary.length - 1))) }],
-        }),
-        () => ({
-            practiceType: 'PRIMARY_PLUS_INTERMEDIATE',
-            label: 'Primary + Partial Intermediate',
-            groups: [
-                { key: 'PRIMARY' },
-                { key: 'INTERMEDIATE', uptoIndex: Math.max(5, randInt(10, Math.max(10, intermediate.length - 1))) },
-            ],
-        }),
-        () => ({
-            practiceType: 'FULL_INTERMEDIATE',
-            label: 'Full Intermediate',
-            groups: [{ key: 'INTERMEDIATE' }],
-        }),
-        () => ({
-            practiceType: 'INTERMEDIATE_PLUS_ADVANCED',
-            label: 'Intermediate + Partial Adv A',
-            groups: [
-                { key: 'INTERMEDIATE' },
-                { key: 'ADVANCED_A', uptoIndex: Math.max(5, randInt(8, Math.max(8, advA.length - 1))) },
-            ],
-        }),
-        () => ({
-            practiceType: 'ADVANCED_A',
-            label: 'Advanced A (partial)',
-            groups: [{ key: 'ADVANCED_A', uptoIndex: Math.max(8, randInt(12, Math.max(12, advA.length - 1))) }],
-        }),
-        () => ({
-            practiceType: 'ADVANCED_B',
-            label: 'Advanced B (partial)',
-            groups: [{ key: 'ADVANCED_B', uptoIndex: Math.max(6, randInt(10, Math.max(10, advB.length - 1))) }],
-        }),
-        () => ({
-            practiceType: 'ADVANCED_A',
-            label: 'Full Advanced A',
-            groups: [{ key: 'ADVANCED_A'}],
-        }),
-        () => ({
-            practiceType: 'ADVANCED_B',
-            label: 'Full Advanced B',
-            groups: [{ key: 'ADVANCED_B'}],
-        }),
-    ];
-
-    // bias toward Primary-heavy weeks
-    const pick = randChoice([0, 0, 1, 2, 3, 3, 4, 5, 6, 7, 8]);
-    return options[pick]();
-}
-
-// --- Main -----------------------------------------------------------------
+type PoseRow = {
+    id: string;
+    slug: string;
+    sanskritName: string;
+    isTwoSided: boolean;
+    sequenceGroup: SequenceGroup;
+    orderInGroup: number | null;
+};
 
 async function resolveUserId(): Promise<string> {
     if (USER_ID) return USER_ID;
+
     if (USER_EMAIL) {
         const u = await prisma.user.findUnique({ where: { email: USER_EMAIL }, select: { id: true } });
         if (!u) throw new Error(`No user found for email ${USER_EMAIL}`);
         return u.id;
     }
-    const first = await prisma.user.findFirst({ select: { id: true, email: true, name: true } });
-    if (!first) throw new Error('No users found. Create a user first.');
+
+    const first = await prisma.user.findFirst({ select: { id: true, email: true } });
+    if (!first) throw new Error("No users found. Create a user first.");
     console.warn(`⚠️ USER_ID not provided; using first user: ${first.email ?? first.id}`);
     return first.id;
 }
 
 async function loadPoseCatalog() {
-    const poses = await prisma.pose.findMany({
-        orderBy: [{ sequenceGroup: 'asc' }, { orderInGroup: 'asc' }],
-        select: { id: true, sanskritName: true, isTwoSided: true, sequenceGroup: true },
+    const poses: PoseRow[] = await prisma.pose.findMany({
+        select: {
+            id: true,
+            slug: true,
+            sanskritName: true,
+            isTwoSided: true,
+            sequenceGroup: true,
+            orderInGroup: true,
+        },
     });
 
-    // group
-    const by = <T extends SequenceGroup>(key: T) =>
-        poses.filter(p => p.sequenceGroup === key);
+    // group + sort
+    const by = (key: SequenceGroup) =>
+        poses
+            .filter((p) => p.sequenceGroup === key)
+            .sort((a, b) => {
+                const oa = a.orderInGroup ?? 1_000_000;
+                const ob = b.orderInGroup ?? 1_000_000;
+                if (oa !== ob) return oa - ob;
+                return a.sanskritName.localeCompare(b.sanskritName);
+            });
 
     return {
-        sun: by('SUN_SALUTATIONS'),
-        standing: by('STANDING'),
-        primary: by('PRIMARY'),
-        intermediate: by('INTERMEDIATE'),
-        advA: by('ADVANCED_A'),
-        advB: by('ADVANCED_B'),
-        finishing: by('FINISHING'),
+        sun: by("SUN_SALUTATIONS"),
+        standing: by("STANDING"),
+        primary: by("PRIMARY"),
+        intermediate: by("INTERMEDIATE"),
+        advA: by("ADVANCED_A"),
+        advB: by("ADVANCED_B"),
+        backbending: by("BACKBENDING"),
+        finishing: by("FINISHING"),
     };
 }
 
-async function createDay(
-    userId: string,
-    date: Date,
-    catalog: Awaited<ReturnType<typeof loadPoseCatalog>>
-) {
+/** Weighted pick of practice types (aligned to your current enum). */
+function randomPracticeType(): PracticeType {
+    // tweak weights however you want
+    const roll = Math.random();
+    if (roll < 0.48) return "FULL_PRIMARY";
+    if (roll < 0.63) return "ADVANCED_B";
+    if (roll < 0.83) return "INTERMEDIATE";
+    if (roll < 0.93) return "ADVANCED_A";
+    return "ADVANCED_B";
+}
+
+function halfPrimaryCutIndex(primary: PoseRow[]) {
+    // prefer canonical cut at navasana if available
+    const idx = primary.findIndex((p) => p.slug === "navasana");
+    if (idx !== -1) return idx + 1;
+
+    // fallback: pick a reasonable mid-point
+    return Math.max(10, Math.min(primary.length, randInt(12, 22)));
+}
+
+function buildMidPoses(catalog: Awaited<ReturnType<typeof loadPoseCatalog>>, t: PracticeType): PoseRow[] {
+    if (t === "FULL_PRIMARY") return [...catalog.primary];
+
+    if (t === "HALF_PRIMARY") {
+        const cut = halfPrimaryCutIndex(catalog.primary);
+        return catalog.primary.slice(0, cut);
+    }
+
+    // INTERMEDIATE / ADVANCED_* should include Primary (ashtanga reality)
+    if (t === "INTERMEDIATE") return [...catalog.primary, ...catalog.intermediate];
+    if (t === "ADVANCED_A") return [...catalog.primary, ...catalog.intermediate, ...catalog.advA];
+    if (t === "ADVANCED_B") return [...catalog.primary, ...catalog.intermediate, ...catalog.advA, ...catalog.advB];
+
+    return [...catalog.primary];
+}
+
+async function createDay(userId: string, date: Date, catalog: Awaited<ReturnType<typeof loadPoseCatalog>>) {
     const dayStart = startOfDay(date);
     const dayEnd = endOfDay(date);
 
@@ -183,103 +214,97 @@ async function createDay(
         where: { userId, date: { gte: dayStart, lte: dayEnd } },
     });
 
-    // Decide session mid-plan
-    const mid = randomMidPlan(catalog.primary, catalog.intermediate, catalog.advA, catalog.advB);
+    const practiceType = randomPracticeType();
+    const label = `AutoSeed: ${practiceType}`;
+
+    const midPoses = buildMidPoses(catalog, practiceType);
 
     // Compose ordered pose list for the session
-    const pickUpto = (arr: typeof catalog.primary, idx?: number) =>
-        typeof idx === 'number' ? arr.slice(0, Math.min(Math.max(1, idx), arr.length)) : arr;
-
-    const midPoses = mid.groups.flatMap(g => {
-        const arr =
-            g.key === 'PRIMARY' ? catalog.primary :
-                g.key === 'INTERMEDIATE' ? catalog.intermediate :
-                    g.key === 'ADVANCED_A' ? catalog.advA :
-                        g.key === 'ADVANCED_B' ? catalog.advB : [];
-        return pickUpto(arr, g.uptoIndex);
-    });
-
-    const ordered = [
+    const ordered: PoseRow[] = [
         ...catalog.sun,
         ...catalog.standing,
         ...midPoses,
+        ...catalog.backbending, // if empty, fine
         ...catalog.finishing,
-    ];
+    ].sort((a, b) => {
+        const ga = GROUP_FLOW_ORDER[a.sequenceGroup] ?? 999;
+        const gb = GROUP_FLOW_ORDER[b.sequenceGroup] ?? 999;
+        if (ga !== gb) return ga - gb;
+
+        const oa = a.orderInGroup ?? 1_000_000;
+        const ob = b.orderInGroup ?? 1_000_000;
+        if (oa !== ob) return oa - ob;
+
+        return a.sanskritName.localeCompare(b.sanskritName);
+    });
 
     // Day “quality” affects metrics
     const isGoodDay = Math.random() < GOOD_DAY_PROB;
-    const baseGood = isGoodDay ? 7.2 : 5.8;   // avg for good vs meh days
+    const baseGood = isGoodDay ? 7.2 : 5.8;
     const sd = isGoodDay ? 1.1 : 1.4;
 
-    // Build scorecards
     let order = 1;
     const scData: Prisma.ScoreCardCreateManyInput[] = [];
+
     for (const pose of ordered) {
         const seg = segmentForPose(pose.sequenceGroup, pose.sanskritName);
 
-        // notes for sun salutation reps
         const maybeNotes =
-            pose.sequenceGroup === 'SUN_SALUTATIONS'
-                ? (/surya\s+namaskar\s+b/i.test(pose.sanskritName) ? `reps: ${SUN_B_REPS}` : `reps: ${SUN_A_REPS}`)
+            pose.sequenceGroup === "SUN_SALUTATIONS"
+                ? /surya\s+namaskar\s+b/i.test(pose.sanskritName)
+                    ? `reps: ${SUN_B_REPS}`
+                    : `reps: ${SUN_A_REPS}`
                 : undefined;
 
-        // Generate metrics (bias toward baseGood; pain inversely)
+        const skipped = false;
+
+        // IMPORTANT: pain here uses same direction as other metrics (higher = “better”)
+        // so it aligns with your current overallScore averaging.
         const ease = randNormInt(baseGood, sd);
         const comfort = randNormInt(baseGood, sd);
         const stability = randNormInt(baseGood, sd);
         const breath = randNormInt(baseGood, sd);
         const focus = randNormInt(baseGood, sd);
-        const pain = randNormInt(11 - baseGood, sd, 1, 10); // lower on good days
+        const pain = randNormInt(baseGood, sd);
 
-        const common = {
-            orderInSession: order++,
-            segment: seg,
-            skipped: false,
-            notes: maybeNotes,
-            ease, comfort, stability, breath, focus, pain,
+        const mk = (side: Side, tweak?: Partial<Record<"ease" | "comfort" | "stability" | "breath" | "focus" | "pain", number>>) => {
+            const m = {
+                ease: tweak?.ease ?? ease,
+                comfort: tweak?.comfort ?? comfort,
+                stability: tweak?.stability ?? stability,
+                breath: tweak?.breath ?? breath,
+                focus: tweak?.focus ?? focus,
+                pain: tweak?.pain ?? pain,
+            };
+
+            const overallScore = computeOverallScore({ ...m, skipped });
+
+            scData.push({
+                sessionId: "to-fill", // replaced after session create
+                poseId: pose.id,
+                orderInSession: order++,
+                segment: seg,
+                side,
+                skipped,
+                notes: maybeNotes,
+                ...m,
+                overallScore: overallScore ?? undefined,
+            });
         };
 
         if (pose.isTwoSided) {
-            // RIGHT
-            const right = { ...common, side: 'RIGHT' as const };
-            const rightOverall = computeOverallScore(right);
-            scData.push({
-                poseId: pose.id,
-                sessionId: 'to-fill', // placeholder; replaced later
-                ...right,
-                overallScore: rightOverall ?? undefined,
-            });
-
-            // LEFT
-            const left = {
-                ...common,
-                orderInSession: order++,
-                side: 'LEFT' as const,
-                // small asymmetry tweak
-                ease: clamp(common.ease + randInt(-1, 1), 1, 10),
-                stability: clamp(common.stability + randInt(-1, 1), 1, 10),
-                pain: clamp(common.pain + randInt(-1, 1), 1, 10),
-            };
-            const leftOverall = computeOverallScore(left);
-            scData.push({
-                poseId: pose.id,
-                sessionId: 'to-fill',
-                ...left,
-                overallScore: leftOverall ?? undefined,
+            mk("RIGHT");
+            // small asymmetry noise
+            mk("LEFT", {
+                ease: clamp(ease + randInt(-1, 1), 1, 10),
+                stability: clamp(stability + randInt(-1, 1), 1, 10),
+                pain: clamp(pain + randInt(-1, 1), 1, 10),
             });
         } else {
-            const single = { ...common, side: 'NA' as const };
-            const singleOverall = computeOverallScore(single);
-            scData.push({
-                poseId: pose.id,
-                sessionId: 'to-fill',
-                ...single,
-                overallScore: singleOverall ?? undefined,
-            });
+            mk("NA");
         }
     }
 
-    // Session-level meta
     const energyLevel = randNormInt(isGoodDay ? 8 : 6, 1.0);
     const mood = randNormInt(isGoodDay ? 8 : 6, 1.0);
     const durationMinutes = randChoice(BASE_DURATION_MIN);
@@ -289,18 +314,18 @@ async function createDay(
         const session = await tx.practiceSession.create({
             data: {
                 userId,
-                date: new Date(dayStart.getTime() + 12 * 60 * 60 * 1000), // noon to avoid tz edge cases
-                label: `AutoSeed: ${mid.label}`,
-                practiceType: mid.practiceType,
-                status: 'PUBLISHED',
+                date: new Date(dayStart.getTime() + 12 * 60 * 60 * 1000), // noon
+                label,
+                practiceType,
+                status: Status.PUBLISHED, // <-- forced published
                 energyLevel,
                 mood,
                 durationMinutes,
             },
+            select: { id: true },
         });
 
-        // attach sessionId and bulk insert scorecards
-        const toInsert: Prisma.ScoreCardCreateManyInput[] = scData.map(s => ({
+        const toInsert: Prisma.ScoreCardCreateManyInput[] = scData.map((s) => ({
             ...s,
             sessionId: session.id,
         }));
@@ -308,24 +333,26 @@ async function createDay(
         await tx.scoreCard.createMany({ data: toInsert });
 
         // compute session overall (avg of non-skipped with overallScore)
-        const cards = await tx.scoreCard.findMany({
+        const agg = await tx.scoreCard.aggregate({
             where: { sessionId: session.id, skipped: false, overallScore: { not: null } },
-            select: { overallScore: true },
+            _avg: { overallScore: true },
         });
-        const avg =
-            cards.length ? cards.reduce((sum, c) => sum + (c.overallScore ?? 0), 0) / cards.length : null;
 
         const updated = await tx.practiceSession.update({
             where: { id: session.id },
-            data: { overallScore: avg ?? undefined },
-            include: { scoreCards: { orderBy: { orderInSession: 'asc' } } },
+            data: { overallScore: agg._avg.overallScore ?? undefined },
+            include: { scoreCards: { orderBy: { orderInSession: "asc" } } },
         });
 
         return updated;
     });
 
+    console.log(created.id);
+
     return created;
 }
+
+// --- Main -----------------------------------------------------------------
 
 async function main() {
     const userId = await resolveUserId();
@@ -333,13 +360,22 @@ async function main() {
 
     // sanity checks
     if (!catalog.sun.length || !catalog.standing.length || !catalog.finishing.length) {
-        throw new Error('Catalog missing SUN/STANDING/FINISHING poses. Did you seed poses?');
+        throw new Error("Catalog missing SUN/STANDING/FINISHING poses. Did you seed poses?");
     }
     if (!catalog.primary.length && !catalog.intermediate.length && !catalog.advA.length && !catalog.advB.length) {
-        throw new Error('No series poses found (PRIMARY/INTERMEDIATE/ADV_A/ADV_B).');
+        throw new Error("No series poses found (PRIMARY/INTERMEDIATE/ADV_A/ADV_B).");
     }
 
     const today = startOfDay(new Date());
+    const windowStart = new Date(today);
+    windowStart.setDate(today.getDate() - (DAYS - 1));
+
+    if (WIPE_WINDOW) {
+        const del = await prisma.practiceSession.deleteMany({
+            where: { userId, date: { gte: windowStart, lte: endOfDay(today) } },
+        });
+        console.log(`🧹 Wiped ${del.count} sessions in window`);
+    }
 
     for (let i = DAYS - 1; i >= 0; i--) {
         const d = new Date(today);
@@ -347,14 +383,14 @@ async function main() {
 
         const created = await createDay(userId, d, catalog);
         console.log(
-            `✅ ${d.toISOString().slice(0, 10)} — ${created.label}  (${created.scoreCards.length} cards, overall=${created.overallScore ?? 'n/a'})`
+            `✅ ${d.toISOString().slice(0, 10)} — ${created.label}  (${created.scoreCards.length} cards, overall=${created.overallScore ?? "n/a"})`
         );
     }
 }
 
 main()
     .catch((e) => {
-        console.error('❌ Backfill error:', e);
+        console.error("❌ Backfill error:", e);
         process.exit(1);
     })
     .finally(async () => {

@@ -46,14 +46,25 @@ export const sharedStanding: SequenceGroup = [
     LR('Parsvottanasana'),
 ];
 
+// Backbending Sequence - To be integrated soon.
+
+// export const sharedBackbending: SequenceGroup = [
+//     S('Urdhva Dhanurasana'),
+//     S('Drop Backs'),
+//     S('Viparita Chakrasana'), //Tic Tocs
+//     S('Taraksvasana'), //Scorpion
+//     S('Tirieng Mukha Uttanasana'), //Catching
+//     S('Paschimottanasana'), 
+// ]
+
 // 3) Shared Finishing
 export const sharedFinishing: SequenceGroup = [
-    S('Urdhva Dhanurasana'),
-    S('Paschimottanasana'),
+    S('Urdhva Dhanurasana'), //Remove this from finishing and add to backbending sequence
+    S('Paschimottanasana'), //Also remove this and add to backbending
     S('Salamba Sarvangasana'),
     S('Halasana'),
     S('Karnapidasana'),
-    S('Urdva Padmasana'), // keeping your spelling as-is
+    S('Urdva Padmasana'),
     S('Pindasana'),
     S('Matsyasana'),
     S('Uttana Padasana'),

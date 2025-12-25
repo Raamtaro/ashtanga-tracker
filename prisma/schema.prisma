@@ -80,16 +80,16 @@ model Pose {
 }
 
 enum SequenceGroup {
-  WARMUP
+  WARMUP //Not used - can probably be removed with then next migration
   SUN_SALUTATIONS
   STANDING
   PRIMARY
   INTERMEDIATE
   ADVANCED_A
   ADVANCED_B
-  BACKBENDING
+  BACKBENDING //Should be used - need to update existing poses with the backbending sequence
   FINISHING
-  OTHER
+  OTHER //Wtf even is this **facepalm**
 }
 
 model PracticeSession {
@@ -114,8 +114,8 @@ model PracticeSession {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@index([userId, date])
   @@unique([id, userId])
+  @@index([userId, date])
 }
 
 enum Status {
@@ -180,6 +180,6 @@ enum SequenceSegment {
 enum Side {
   LEFT
   RIGHT
-  BOTH
+  BOTH //Not used - can probably be removed with then next migration
   NA
 }
