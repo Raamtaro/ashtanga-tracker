@@ -140,37 +140,44 @@ export const publishSession = async (req: Request, res: Response) => {
     }
 
     const { id } = req.params;
-    const session = await prisma.practiceSession.findUnique(
-        {
-            where: {
-                id: id,
-                userId: client.id
-            },
-            select: {
-                status: true
+    if (!id) return res.status(400).json({ error: 'Missing session id' });
+
+    try {
+        // Try to publish (DRAFT -> PUBLISHED)
+        const published = await prisma.practiceSession.updateMany({
+            where: { id: id, userId: client.id, status: 'DRAFT' },
+            data: { status: 'PUBLISHED' },
+        });
+
+        if (published.count === 0) {
+            // Try to unpublish (PUBLISHED -> DRAFT)
+            const unpublished = await prisma.practiceSession.updateMany({
+                where: { id: id, userId: client.id, status: 'PUBLISHED' },
+                data: { status: 'DRAFT' },
+            });
+
+            if (unpublished.count === 0) {
+                // Nothing changed -> session either doesn't exist or doesn't belong to user
+                const exists = await prisma.practiceSession.findFirst({
+                    where: { id: id, userId: client.id },
+                    select: { id: true },
+                });
+                if (!exists) return res.status(404).json({ error: 'Session not found or no permission' });
             }
         }
-    )
 
-    if (!session) {
-        return res.status(404).json({ error: 'Session not found' });
+        const updated = await prisma.practiceSession.findFirst({
+            where: { id: id, userId: client.id },
+            select: { id: true, status: true, date: true },
+        });
+
+        if (!updated) return res.status(404).json({ error: 'Session not found' });
+
+        return res.json({ session: updated });
+    } catch (err) {
+        console.error('publishSession error', err);
+        return res.status(500).json({ error: 'Internal server error' });
     }
-
-    const changeStatusFlag = session.status === 'DRAFT' ? 'PUBLISHED' : 'DRAFT';
-
-    const updatedSession = await prisma.practiceSession.update(
-        {
-            where: {
-                id: id,
-            },
-            data: {
-                status: changeStatusFlag
-            }
-
-        }
-    )
-
-    res.json({ session: updatedSession });
 }
 
 
