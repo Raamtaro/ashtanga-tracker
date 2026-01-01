@@ -8,7 +8,7 @@ import { ALLOWED_METRICS, type AllowedMetric, type PoseTrendResponse, type Trend
 const SEQUENCE_GROUPS = Object.values(SequenceGroup) as [SequenceGroup, ...SequenceGroup[]];
 const querySchema = z.object({
     fields: z.string().optional().transform((s) =>
-        s ? s.split(",").map((x) => x.trim().toLowerCase()).filter(Boolean) : undefined
+        s ? s.split(",").map((x) => x.trim()).filter(Boolean) : undefined
     ).refine(
         (arr) => !arr || arr.every((f) => (ALLOWED_METRICS as readonly string[]).includes(f)),
         { message: `fields must be a comma-separated list of: ${ALLOWED_METRICS.join(", ")}` }
@@ -79,7 +79,7 @@ export async function listPosesBySegment(req: Request, res: Response) {
         const poses = await prisma.pose.findMany({
             where,
             orderBy: [{ sequenceGroup: 'asc' }, { orderInGroup: 'asc' }, { sanskritName: 'asc' }],
-            select: { slug: true, sanskritName: true, englishName: true, sequenceGroup: true },
+            select: { id: true, slug: true, sanskritName: true, englishName: true, isTwoSided: true, sequenceGroup: true },
         });
 
         res.json({ count: poses.length, poses });
@@ -133,21 +133,30 @@ export const trendPoseMetrics = async (req: Request, res: Response) => {
         // pose header
         const pose = await prisma.pose.findUnique({
             where: { id },
-            select: { id: true, slug: true, sanskritName: true, englishName: true },
+            select: { id: true, slug: true, sanskritName: true, englishName: true, isTwoSided: true },
         });
         if (!pose) return res.status(404).json({ message: "Pose not found." });
 
         // where
+
+        const sessionDate: Prisma.DateTimeFilter | undefined =
+            from || to
+                ? {
+                    ...(from ? { gte: from } : {}),
+                    ...(to ? { lt: to } : {}),
+                }
+                : undefined;
         const where: Prisma.ScoreCardWhereInput = {
             poseId: id,
             session: {
                 userId: client.id,
-                ...(from ? { date: { gte: from } } : {}),
-                ...(to ? { date: { lt: to } } : {}),
+                ...(sessionDate ? { date: sessionDate } : {}),
+                // optional but you said you want published-only trends:
+                status: 'PUBLISHED',
             },
             ...(q.includeSkipped ? {} : { skipped: false }),
-            ...(q.side && q.side !== "ALL"
-                ? { side: q.side === "BOTH" ? { in: ["LEFT", "RIGHT"] } : q.side }
+            ...(q.side && q.side !== 'ALL'
+                ? { side: q.side === 'BOTH' ? { in: ['LEFT', 'RIGHT'] } : q.side }
                 : {}),
         };
 

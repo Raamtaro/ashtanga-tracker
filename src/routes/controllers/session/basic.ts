@@ -13,6 +13,17 @@ import { SequenceGroup } from "@prisma/client";
 //     to: z.coerce.date().optional(),
 // });
 
+const REQUIRED_METRICS = ["ease", "comfort", "stability", "pain", "breath", "focus"] as const;
+
+function computeCardOverall(sc: Record<(typeof REQUIRED_METRICS)[number], number | null>) {
+    const nums = REQUIRED_METRICS
+        .map((k) => sc[k])
+        .filter((v): v is number => typeof v === "number");
+    if (!nums.length) return null;
+    const avg = nums.reduce((a, b) => a + b, 0) / nums.length;
+    return Math.round(avg * 100) / 100; // 2 decimals
+}
+
 // GET /poses?segment=PRIMARY (optional)
 const posesQuerySchema = z.object({
     segment: z.enum(SequenceGroup).optional(),
@@ -133,52 +144,166 @@ export async function getAllSessions(req: Request, res: Response) {
     res.json({ items, nextCursor });
 }
 
+// export const publishSession = async (req: Request, res: Response) => {
+//     const client = req.user as { id: string } | undefined;
+//     if (!client?.id) {
+//         return res.status(401).json({ message: "Unauthorized" });
+//     }
+
+//     const { id } = req.params;
+//     if (!id) return res.status(400).json({ error: 'Missing session id' });
+
+//     try {
+//         // Try to publish (DRAFT -> PUBLISHED)
+//         const published = await prisma.practiceSession.updateMany({
+//             where: { id: id, userId: client.id, status: 'DRAFT' },
+//             data: { status: 'PUBLISHED' },
+//         });
+
+//         if (published.count === 0) {
+//             // Try to unpublish (PUBLISHED -> DRAFT)
+//             const unpublished = await prisma.practiceSession.updateMany({
+//                 where: { id: id, userId: client.id, status: 'PUBLISHED' },
+//                 data: { status: 'DRAFT' },
+//             });
+
+//             if (unpublished.count === 0) {
+//                 // Nothing changed -> session either doesn't exist or doesn't belong to user
+//                 const exists = await prisma.practiceSession.findFirst({
+//                     where: { id: id, userId: client.id },
+//                     select: { id: true },
+//                 });
+//                 if (!exists) return res.status(404).json({ error: 'Session not found or no permission' });
+//             }
+//         }
+
+//         const updated = await prisma.practiceSession.findFirst({
+//             where: { id: id, userId: client.id },
+//             select: { id: true, status: true, date: true },
+//         });
+
+//         if (!updated) return res.status(404).json({ error: 'Session not found' });
+
+//         return res.json({ session: updated });
+//     } catch (err) {
+//         console.error('publishSession error', err);
+//         return res.status(500).json({ error: 'Internal server error' });
+//     }
+// }
+
 export const publishSession = async (req: Request, res: Response) => {
     const client = req.user as { id: string } | undefined;
-    if (!client?.id) {
-        return res.status(401).json({ message: "Unauthorized" });
-    }
+    if (!client?.id) return res.status(401).json({ message: "Unauthorized" });
 
     const { id } = req.params;
-    if (!id) return res.status(400).json({ error: 'Missing session id' });
+    if (!id) return res.status(400).json({ error: "Missing session id" });
 
     try {
-        // Try to publish (DRAFT -> PUBLISHED)
-        const published = await prisma.practiceSession.updateMany({
-            where: { id: id, userId: client.id, status: 'DRAFT' },
-            data: { status: 'PUBLISHED' },
-        });
-
-        if (published.count === 0) {
-            // Try to unpublish (PUBLISHED -> DRAFT)
-            const unpublished = await prisma.practiceSession.updateMany({
-                where: { id: id, userId: client.id, status: 'PUBLISHED' },
-                data: { status: 'DRAFT' },
+        const result = await prisma.$transaction(async (tx) => {
+            const session = await tx.practiceSession.findFirst({
+                where: { id, userId: client.id },
+                select: { id: true, status: true },
             });
 
-            if (unpublished.count === 0) {
-                // Nothing changed -> session either doesn't exist or doesn't belong to user
-                const exists = await prisma.practiceSession.findFirst({
-                    where: { id: id, userId: client.id },
+            if (!session) {
+                return { kind: "not_found" as const };
+            }
+
+            // If currently published -> unpublish (no validation)
+            if (session.status === "PUBLISHED") {
+                const updated = await tx.practiceSession.update({
+                    where: { id: session.id },
+                    data: { status: "DRAFT" },
+                    select: { id: true, status: true, date: true, overallScore: true },
+                });
+                return { kind: "ok" as const, session: updated };
+            }
+
+            // Otherwise, publishing from DRAFT -> PUBLISHED
+            // 1) Validate completeness: any required metric null on any unskipped card?
+            const incomplete = await tx.scoreCard.findFirst({
+                where: {
+                    sessionId: session.id,
+                    skipped: false,
+                    OR: REQUIRED_METRICS.map((k) => ({ [k]: null })),
+                },
+                select: {
+                    id: true,
+                    side: true,
+                    pose: { select: { sanskritName: true, slug: true } },
+                    ease: true,
+                    comfort: true,
+                    stability: true,
+                    pain: true,
+                    breath: true,
+                    focus: true,
+                },
+            });
+
+            if (incomplete) {
+                const missing = REQUIRED_METRICS.filter((k) => incomplete[k] == null);
+                return {
+                    kind: "incomplete" as const,
+                    error: {
+                        message: "Cannot publish: some scorecards are incomplete.",
+                        scoreCardId: incomplete.id,
+                        pose: incomplete.pose,
+                        side: incomplete.side,
+                        missing,
+                    },
+                };
+            }
+
+            // 2) Recompute overallScore for all unskipped cards (safe + idempotent)
+            const cards = await tx.scoreCard.findMany({
+                where: { sessionId: session.id, skipped: false },
+                select: {
+                    id: true,
+                    ease: true,
+                    comfort: true,
+                    stability: true,
+                    pain: true,
+                    breath: true,
+                    focus: true,
+                },
+            });
+
+            for (const c of cards) {
+                const overallScore = computeCardOverall(c);
+                await tx.scoreCard.update({
+                    where: { id: c.id },
+                    data: { overallScore },
                     select: { id: true },
                 });
-                if (!exists) return res.status(404).json({ error: 'Session not found or no permission' });
             }
-        }
 
-        const updated = await prisma.practiceSession.findFirst({
-            where: { id: id, userId: client.id },
-            select: { id: true, status: true, date: true },
+            // 3) Compute + store session overallScore
+            const agg = await tx.scoreCard.aggregate({
+                where: { sessionId: session.id, skipped: false, overallScore: { not: null } },
+                _avg: { overallScore: true },
+            });
+
+            const updated = await tx.practiceSession.update({
+                where: { id: session.id },
+                data: {
+                    status: "PUBLISHED",
+                    overallScore: agg._avg.overallScore ?? null,
+                },
+                select: { id: true, status: true, date: true, overallScore: true },
+            });
+
+            return { kind: "ok" as const, session: updated };
         });
 
-        if (!updated) return res.status(404).json({ error: 'Session not found' });
+        if (result.kind === "not_found") return res.status(404).json({ error: "Session not found or no permission" });
+        if (result.kind === "incomplete") return res.status(409).json(result.error);
 
-        return res.json({ session: updated });
+        return res.json({ session: result.session });
     } catch (err) {
-        console.error('publishSession error', err);
-        return res.status(500).json({ error: 'Internal server error' });
+        console.error("publishSession error", err);
+        return res.status(500).json({ error: "Internal server error" });
     }
-}
+};
 
 
 export async function listPosesBySegment(req: Request, res: Response) {

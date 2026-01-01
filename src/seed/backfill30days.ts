@@ -317,7 +317,7 @@ async function createDay(userId: string, date: Date, catalog: Awaited<ReturnType
                 date: new Date(dayStart.getTime() + 12 * 60 * 60 * 1000), // noon
                 label,
                 practiceType,
-                status: Status.PUBLISHED, // <-- forced published
+                status: Status.DRAFT, // <-- forced published
                 energyLevel,
                 mood,
                 durationMinutes,
