@@ -9,9 +9,7 @@ const router = Router();
 router.get('/:id', passport.authenticate('jwt',{session: false}), getSessionById) //Simple Get route
 router.get('/', passport.authenticate('jwt',{session: false}), getAllSessions); //Get all sessions
 router.post('/preset', passport.authenticate('jwt',{session: false}), createPresetV2);
-// router.post('/presetv2', passport.authenticate('jwt',{session: false}), createPresetV2);
 router.post('/custom', passport.authenticate('jwt',{session: false}), createCustomV2);
-// router.post('/customv2', passport.authenticate('jwt',{session: false}), createCustomV2);
 router.put('/:id/publish', passport.authenticate('jwt',{session: false}), publishSession);
 
 export default router;

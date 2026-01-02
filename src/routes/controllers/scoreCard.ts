@@ -42,6 +42,14 @@ export const updateScoreCard = async (req: Request, res: Response) => {
         return res.status(401).json({ message: "Unauthorized" });
     }
 
+    const card = await prisma.scoreCard.findUnique({
+        where: { id },
+        select: { sessionId: true, session: { select: { status: true, userId: true } } },
+    });
+
+    if (!card || card.session.userId !== client.id) return res.status(404).json({ error: 'Not found' });
+    if (card.session.status === 'PUBLISHED') return res.status(409).json({ error: 'Session is published. Unpublish to edit.' });
+
     const result = await prisma.$transaction(async (tx) => {
         const existing = await tx.scoreCard.findFirst(
             {
@@ -115,7 +123,7 @@ export const updateScoreCard = async (req: Request, res: Response) => {
         return updated;
     })
 
-    res.json({scoreCard: result});
+    res.json({ scoreCard: result });
 
 }
 

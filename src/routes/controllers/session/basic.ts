@@ -51,51 +51,77 @@ function decodeCursor(s: string | undefined): CursorPayload | undefined {
 
 export const getSessionById = async (req: Request, res: Response) => {
     const client = req.user as { id: string } | undefined;
-
-    if (!client?.id) {
-        return res.status(401).json({ message: "Unauthorized" });
-    }
+    if (!client?.id) return res.status(401).json({ message: "Unauthorized" });
 
     const { id } = req.params;
-    const session = await prisma.practiceSession.findUnique({
-        where: {
-            id: id,
-            userId: client.id
-        },
-        // include: { 
-        //     scoreCards: { 
-        //         orderBy: { orderInSession: 'asc' },
-        //         include: { pose: {
-        //             select: {
-        //                 slug: true
-        //             }
-        //         }}
-        //     } 
-        // },
+
+    const session = await prisma.practiceSession.findFirst({
+        where: { id, userId: client.id },
         select: {
-            // id: true,
+            id: true,
+            status: true,
+            date: true,
+            overallScore: true,
             scoreCards: {
                 orderBy: { orderInSession: 'asc' },
                 select: {
                     id: true,
                     side: true,
+                    skipped: true,
                     overallScore: true,
+                    ease: true,
+                    comfort: true,
+                    stability: true,
+                    pain: true,
+                    breath: true,
+                    focus: true,
                     pose: {
-                        select: {
-                            sanskritName: true,
-                            sequenceGroup: true,
-                        }
-                    }
-                }
-            }
-        }
+                        select: { sanskritName: true, sequenceGroup: true },
+                    },
+                },
+            },
+        },
     });
-    if (!session) {
-        return res.status(404).json({ error: 'Session not found' });
-    }
-    res.json({ session });
 
-}
+    if (!session) return res.status(404).json({ error: "Session not found" });
+
+    const scoreCards = session.scoreCards.map((c) => {
+        const missingAny =
+            !c.skipped && REQUIRED_METRICS.some((k) => (c as any)[k] == null);
+
+        const isComplete = c.skipped ? true : !missingAny;
+
+        return {
+            id: c.id,
+            side: c.side,
+            skipped: c.skipped,
+            overallScore: c.overallScore,
+            isComplete,
+            pose: c.pose,
+        };
+    });
+
+    const firstIncomplete = scoreCards.find((c) => !c.isComplete)?.id ?? null;
+
+    const summary = {
+        total: scoreCards.length,
+        complete: scoreCards.filter((c) => c.isComplete).length,
+        incomplete: scoreCards.filter((c) => !c.isComplete).length,
+        firstIncompleteScoreCardId: firstIncomplete,
+    };
+
+    return res.json({
+        session: {
+            id: session.id,
+            status: session.status,
+            date: session.date.toISOString(),
+            overallScore: session.overallScore,
+            summary,
+            scoreCards,
+        },
+    });
+};
+
 
 export async function getAllSessions(req: Request, res: Response) {
     const client = req.user as { id: string } | undefined;
