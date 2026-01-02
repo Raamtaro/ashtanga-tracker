@@ -29,6 +29,7 @@ const SEGMENT_FOR_GROUP: Record<GroupKey, SequenceSegment> = {
     INTERMEDIATE_ONLY: 'INTERMEDIATE',
     ADVANCED_A_ONLY: 'ADVANCED_A',
     ADVANCED_B_ONLY: 'ADVANCED_B',
+    BACKBENDING: 'BACKBENDING',
     FINISHING: 'FINISHING',
 };
 
@@ -148,6 +149,7 @@ function populatePresetPlan(input: z.infer<typeof presetBodySchema>): PlanItem[]
 
     const sunSalutations = toPlanItems('SUN', namesFromGroupKey('SUN'));
     const standing = toPlanItems('STANDING', namesFromGroupKey('STANDING'));
+    const backbending = toPlanItems('BACKBENDING', namesFromGroupKey('BACKBENDING'));
     const finishing = toPlanItems('FINISHING', namesFromGroupKey('FINISHING'));
 
     plan.push(...sunSalutations);
@@ -180,7 +182,7 @@ function populatePresetPlan(input: z.infer<typeof presetBodySchema>): PlanItem[]
         }
     }
 
-
+    plan.push(...backbending);
     plan.push(...finishing)
     return plan;
 }
@@ -189,6 +191,7 @@ function populateCustomPlan(input: z.infer<typeof customBodySchema>): PlanItem[]
     const plan: PlanItem[] = []
     const sunSalutations = toPlanItems('SUN', namesFromGroupKey('SUN'));
     const standing = toPlanItems('STANDING', namesFromGroupKey('STANDING'));
+    const backbending = toPlanItems('BACKBENDING', namesFromGroupKey('BACKBENDING'));
     const finishing = toPlanItems('FINISHING', namesFromGroupKey('FINISHING'));
 
     for (const segment of input.sequenceSnippets) {
@@ -219,7 +222,7 @@ function populateCustomPlan(input: z.infer<typeof customBodySchema>): PlanItem[]
         }
     }
 
-    return [...sunSalutations, ...standing, ...plan, ...finishing];
+    return [...sunSalutations, ...standing, ...plan, ...backbending, ...finishing];
 }
 
 async function buildSessionWithScoreCards(
