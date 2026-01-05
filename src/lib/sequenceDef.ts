@@ -17,6 +17,7 @@ export type GroupKey =
     | 'INTERMEDIATE_ONLY'
     | 'ADVANCED_A_ONLY'
     | 'ADVANCED_B_ONLY'
+    | 'BACKBENDING'
     | 'FINISHING';
 
 // ---- Tiny helpers to reduce boilerplate ----
@@ -48,19 +49,19 @@ export const sharedStanding: SequenceGroup = [
 
 // Backbending Sequence - To be integrated soon.
 
-// export const sharedBackbending: SequenceGroup = [
-//     S('Urdhva Dhanurasana'),
-//     S('Drop Backs'),
-//     S('Viparita Chakrasana'), //Tic Tocs
-//     S('Taraksvasana'), //Scorpion
-//     S('Tirieng Mukha Uttanasana'), //Catching
-//     S('Paschimottanasana'), 
-// ]
+export const sharedBackbending: SequenceGroup = [
+    S('Urdhva Dhanurasana'),
+    S('Drop Backs'),
+    S('Viparita Chakrasana'), //Tic Tocs
+    S('Taraksvasana'), //Scorpion
+    S('Tirieng Mukha Uttanasana'), //Catching
+    S('Paschimottanasana'), 
+]
 
 // 3) Shared Finishing
 export const sharedFinishing: SequenceGroup = [
-    S('Urdhva Dhanurasana'), //Remove this from finishing and add to backbending sequence
-    S('Paschimottanasana'), //Also remove this and add to backbending
+    // S('Urdhva Dhanurasana'), //Remove this from finishing and add to backbending sequence
+    // S('Paschimottanasana'), //Also remove this and add to backbending
     S('Salamba Sarvangasana'),
     S('Halasana'),
     S('Karnapidasana'),
@@ -237,6 +238,7 @@ export const advancedBOnly: SequenceGroup = [
 export const CATALOG: Record<GroupKey, SequenceGroup> = {
     SUN: sunSalutations,
     STANDING: sharedStanding,
+    BACKBENDING: sharedBackbending,
     FINISHING: sharedFinishing,
     PRIMARY_ONLY: primaryOnly,
     INTERMEDIATE_ONLY: intermediateOnly,
@@ -252,23 +254,23 @@ export const compose = (...groups: GroupKey[]): SequenceGroup =>
 export const primarySeries: SequenceDefinition = {
     name: 'Ashtanga Primary Series',
     description: 'The first series of Ashtanga Yoga, also known as Yoga Chikitsa (Yoga Therapy).',
-    poses: compose('STANDING', 'PRIMARY_ONLY', 'FINISHING'),
+    poses: compose('STANDING', 'PRIMARY_ONLY', 'BACKBENDING', 'FINISHING'),
 };
 
 export const intermediateSeries: SequenceDefinition = {
     name: 'Ashtanga Intermediate Series',
     description: 'The second series of Ashtanga Yoga, also known as Nadi Shodhana (Nerve Purification).',
-    poses: compose('STANDING', 'INTERMEDIATE_ONLY', 'FINISHING'),
+    poses: compose('STANDING', 'INTERMEDIATE_ONLY', 'BACKBENDING', 'FINISHING'),
 };
 
 export const advancedASeries: SequenceDefinition = {
     name: 'Ashtanga Advanced A Series',
     description: 'The third series of Ashtanga Yoga, also known as Sthira Bhaga (Strength and Grace).',
-    poses: compose('STANDING', 'ADVANCED_A_ONLY', 'FINISHING'),
+    poses: compose('STANDING', 'ADVANCED_A_ONLY', 'BACKBENDING', 'FINISHING'),
 };
 
 export const advancedBSeries: SequenceDefinition = {
     name: 'Ashtanga Advanced B Series',
     description: 'The fourth series of Ashtanga Yoga, also known as Sthira Bhaga (Strength and Grace).',
-    poses: compose('STANDING', 'ADVANCED_B_ONLY', 'FINISHING'),
+    poses: compose('STANDING', 'ADVANCED_B_ONLY', 'BACKBENDING', 'FINISHING'),
 };
