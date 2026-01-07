@@ -4,15 +4,6 @@ import { Request, Response } from "express";
 import { z } from "zod";
 import { SequenceGroup } from "@prisma/client";
 
-// // GET /sessions?page=1&limit=20&status=PUBLISHED&from=2025-11-01&to=2025-11-30
-// const sessionsQuerySchema = z.object({
-//     page: z.coerce.number().int().positive().optional().default(1),
-//     limit: z.coerce.number().int().positive().max(100).optional().default(20),
-//     status: z.enum(['DRAFT', 'PUBLISHED', 'ARCHIVED']).optional(),
-//     from: z.coerce.date().optional(),
-//     to: z.coerce.date().optional(),
-// });
-
 const REQUIRED_METRICS = ["ease", "comfort", "stability", "pain", "breath", "focus"] as const;
 
 function computeCardOverall(sc: Record<(typeof REQUIRED_METRICS)[number], number | null>) {
@@ -61,6 +52,7 @@ export const getSessionById = async (req: Request, res: Response) => {
             id: true,
             status: true,
             date: true,
+            label: true,
             overallScore: true,
             scoreCards: {
                 orderBy: { orderInSession: 'asc' },
@@ -169,53 +161,6 @@ export async function getAllSessions(req: Request, res: Response) {
     // Shape your FE expects
     res.json({ items, nextCursor });
 }
-
-// export const publishSession = async (req: Request, res: Response) => {
-//     const client = req.user as { id: string } | undefined;
-//     if (!client?.id) {
-//         return res.status(401).json({ message: "Unauthorized" });
-//     }
-
-//     const { id } = req.params;
-//     if (!id) return res.status(400).json({ error: 'Missing session id' });
-
-//     try {
-//         // Try to publish (DRAFT -> PUBLISHED)
-//         const published = await prisma.practiceSession.updateMany({
-//             where: { id: id, userId: client.id, status: 'DRAFT' },
-//             data: { status: 'PUBLISHED' },
-//         });
-
-//         if (published.count === 0) {
-//             // Try to unpublish (PUBLISHED -> DRAFT)
-//             const unpublished = await prisma.practiceSession.updateMany({
-//                 where: { id: id, userId: client.id, status: 'PUBLISHED' },
-//                 data: { status: 'DRAFT' },
-//             });
-
-//             if (unpublished.count === 0) {
-//                 // Nothing changed -> session either doesn't exist or doesn't belong to user
-//                 const exists = await prisma.practiceSession.findFirst({
-//                     where: { id: id, userId: client.id },
-//                     select: { id: true },
-//                 });
-//                 if (!exists) return res.status(404).json({ error: 'Session not found or no permission' });
-//             }
-//         }
-
-//         const updated = await prisma.practiceSession.findFirst({
-//             where: { id: id, userId: client.id },
-//             select: { id: true, status: true, date: true },
-//         });
-
-//         if (!updated) return res.status(404).json({ error: 'Session not found' });
-
-//         return res.json({ session: updated });
-//     } catch (err) {
-//         console.error('publishSession error', err);
-//         return res.status(500).json({ error: 'Internal server error' });
-//     }
-// }
 
 export const publishSession = async (req: Request, res: Response) => {
     const client = req.user as { id: string } | undefined;

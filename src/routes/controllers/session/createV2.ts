@@ -272,13 +272,13 @@ async function buildSessionWithScoreCards(
 
     return await tx.practiceSession.findUnique({
         where: { id: session.id },
-        select: { 
+        select: {
             id: true,
             date: true,
             label: true,
             practiceType: true,
             durationMinutes: true,
-            scoreCards: { 
+            scoreCards: {
                 orderBy: { orderInSession: 'asc' },
                 select: {
                     id: true,
@@ -290,7 +290,7 @@ async function buildSessionWithScoreCards(
                         }
                     }
                 },
-            } 
+            }
         },
     });
 }
@@ -302,7 +302,19 @@ export const createPresetSession = async (req: Request, res: Response) => {
         return res.status(401).json({ message: "Unauthorized" });
     }
 
-    const body = presetBodySchema.parse(req.body);
+    // const body = presetBodySchema.parse(req.body);
+    const parsed = presetBodySchema.safeParse(req.body);
+    if (!parsed.success) {
+        return res.status(422).json({
+            message: "Invalid input",
+            issues: parsed.error.issues.map(i => ({
+                path: i.path.join('.'),
+                message: i.message,
+            })),
+        });
+    }
+    const body = parsed.data;
+
 
     if (body.practiceType === PracticeType.CUSTOM) {
         return res.status(400).json({ message: "Invalid practiceType for preset session" });
@@ -336,7 +348,20 @@ export const createCustomSession = async (req: Request, res: Response) => {
 
 
 
-    const body = customBodySchema.parse(req.body);
+    // const body = customBodySchema.parse(req.body);
+
+    const parsed = customBodySchema.safeParse(req.body);
+    if (!parsed.success) {
+        return res.status(422).json({
+            message: "Invalid input",
+            issues: parsed.error.issues.map(i => ({
+                path: i.path.join('.'),
+                message: i.message,
+            })),
+        });
+    }
+
+    const body = parsed.data;
 
     if (body.practiceType !== PracticeType.CUSTOM) {
         return res.status(400).json({ message: "Invalid practiceType for custom session" });
