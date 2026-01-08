@@ -3,7 +3,7 @@ import { SequenceSegment, PracticeType, Prisma } from "@prisma/client";
 import { Request, Response } from "express";
 import { z } from 'zod';
 
-import { CATALOG, primaryOnly, intermediateOnly, advancedAOnly, advancedBOnly, type GroupKey } from '../../../lib/sequenceDef';
+import { CATALOG, primaryOnly, intermediateOnly, advancedAOnly, advancedBOnly, type GroupKey } from '../../../lib/sequenceDef.js';
 
 
 
