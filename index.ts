@@ -1,5 +1,5 @@
 import express, { Express, Request, Response, NextFunction } from "express";
-import routes from "./src/routes";
+import routes from "./src/routes/index.js";
 import dotenv from 'dotenv';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
