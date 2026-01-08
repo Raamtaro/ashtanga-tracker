@@ -1,6 +1,6 @@
-import prisma from "../lib/prisma";
+import prisma from "../lib/prisma.js";
 import {SequenceGroup as DBGroup, Pose, PrismaPromise } from "@prisma/client";
-import { CATALOG } from "../lib/sequenceDef";
+import { CATALOG } from "../lib/sequenceDef.js";
 
 // map your catalog keys to Prisma enum values
 const GROUP_MAP: Record<string, DBGroup> = {

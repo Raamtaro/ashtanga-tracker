@@ -1,7 +1,7 @@
-import poses from './poses';
-import session from './session';
-import auth from './auth';
-import scoreCard from './scoreCard';
+import poses from './poses.js';
+import session from './session.js';
+import auth from './auth.js';
+import scoreCard from './scoreCard.js';
 
 export default {
     poses,

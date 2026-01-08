@@ -1,4 +1,4 @@
-import prisma from "../../../lib/prisma";
+import prisma from "../../../lib/prisma.js";
 import { Prisma } from "@prisma/client";
 import { Request, Response } from "express";
 import { z } from "zod";

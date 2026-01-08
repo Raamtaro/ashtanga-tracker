@@ -4,7 +4,7 @@
  * - Need to reseed poses after running this script
  */
 
-import prisma from "../lib/prisma";
+import prisma from "../lib/prisma.js";
 import type { Prisma } from "@prisma/client";
 
 const args = process.argv.slice(2);

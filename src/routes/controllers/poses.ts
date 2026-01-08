@@ -1,8 +1,8 @@
-import prisma from "../../lib/prisma";
+import prisma from "../../lib/prisma.js";
 import { Prisma, SequenceGroup } from "@prisma/client";
 import { Request, Response } from "express";
 import { z } from "zod";
-import { ALLOWED_METRICS, type AllowedMetric, type PoseTrendResponse, type TrendPoint } from "../../types/trend";
+import { ALLOWED_METRICS, type AllowedMetric, type PoseTrendResponse, type TrendPoint } from "../../types/trend.js";
 
 
 const SEQUENCE_GROUPS = Object.values(SequenceGroup) as [SequenceGroup, ...SequenceGroup[]];

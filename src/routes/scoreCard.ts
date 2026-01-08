@@ -1,6 +1,6 @@
 import Router from "express";
 import passport from "passport";
-import { updateScoreCard,getScoreCardById } from "./controllers/scoreCard";
+import { updateScoreCard,getScoreCardById } from "./controllers/scoreCard.js";
 
 
 const router = Router();

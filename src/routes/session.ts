@@ -1,7 +1,7 @@
 import Router from "express";
 // import { createPresetSession, createCustomSession,  } from "./controllers/session/create";
-import { createPresetSession as createPresetV2, createCustomSession as createCustomV2 } from "./controllers/session/createV2";
-import { publishSession, getSessionById, getAllSessions } from "./controllers/session/basic";
+import { createPresetSession as createPresetV2, createCustomSession as createCustomV2 } from "./controllers/session/createV2.js";
+import { publishSession, getSessionById, getAllSessions } from "./controllers/session/basic.js";
 import passport from "passport";
 
 const router = Router();

@@ -1,5 +1,5 @@
 import { Router } from "express";
-import {getAllPoses, getPoseById, listPosesBySegment, trendPoseMetrics} from "./controllers/poses"
+import {getAllPoses, getPoseById, listPosesBySegment, trendPoseMetrics} from "./controllers/poses.js"
 import passport from "passport";
 
 const router = Router();

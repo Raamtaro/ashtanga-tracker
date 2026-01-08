@@ -8,11 +8,11 @@ import { randomUUID } from "crypto";
 import { ZodError } from "zod";
 
 import passport from "passport";
-import { localStrategy } from "./src/config/passportLocal";
-import { jwtStrategy } from "./src/config/passportJwt";
+import { localStrategy } from "./src/config/passportLocal.js";
+import { jwtStrategy } from "./src/config/passportJwt.js";
 
 import session from "express-session";
-import prisma from "./src/lib/prisma";
+import prisma from "./src/lib/prisma.js";
 import { PrismaSessionStore } from "@quixo3/prisma-session-store";
 import cors from "cors";
 

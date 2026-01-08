@@ -1,5 +1,5 @@
 import Router from "express";
-import { signup, loginUser, getAllUsers, deleteAccount } from "./controllers/auth";
+import { signup, loginUser, getAllUsers, deleteAccount } from "./controllers/auth.js";
 import passport from "passport";
 
 const router = Router();

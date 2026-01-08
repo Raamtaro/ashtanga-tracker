@@ -1,8 +1,8 @@
-import prisma from "../../lib/prisma";
+import prisma from "../../lib/prisma.js";
 import { Request, Response } from "express";
 import { z } from "zod";
 import { Prisma } from "@prisma/client"
-import { METRIC_KEYS, type MetricKey } from "../../lib/constants";
+import { METRIC_KEYS, type MetricKey } from "../../lib/constants.js";
 
 
 const metricValue = z.coerce.number().int().min(1).max(10).nullable();
