@@ -136,6 +136,7 @@ export const intermediateOnly: SequenceGroup = [
     LR('Ardha Matsyendrasana'),
     LR('Eka Pada Sirsasana'),
     S('Dwi Pada Sirsasana'),
+    S('Yoga Nidrasana'),
     S('Tittibhasana A'),
     S('Tittibhasana B'),
     S('Tittibhasana C'),
