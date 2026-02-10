@@ -103,6 +103,7 @@ app.use('/pose', routes.poses);
 app.use('/auth', routes.auth);
 app.use('/session', routes.session);
 app.use('/score-card', routes.scoreCard);
+app.use('/health', routes.health);
 
 app.use((req, res) => {
     return res.status(404).json({ error: "Not found" });
