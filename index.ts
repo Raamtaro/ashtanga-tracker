@@ -11,16 +11,16 @@ import passport from "passport";
 import { localStrategy } from "./src/config/passportLocal.js";
 import { jwtStrategy } from "./src/config/passportJwt.js";
 
-import session from "express-session";
-import prisma from "./src/lib/prisma.js";
-import { PrismaSessionStore } from "@quixo3/prisma-session-store";
+// import session from "express-session";
+// import prisma from "./src/lib/prisma.js";
+// import { PrismaSessionStore } from "@quixo3/prisma-session-store";
 import cors from "cors";
 
 
 dotenv.config();
 
 const app: Express = express();
-const port = process.env.PORT || 3000;
+const port = Number(process.env.PORT) || 3000;
 
 if (process.env.NODE_ENV === 'production') {
     app.set('trust proxy', 1); // trust first proxy - for Railway deployments
@@ -71,33 +71,33 @@ const authLimiter = rateLimit({
 app.use("/auth", authLimiter);
 
 
-app.use(
-    session(
-        {
-            store: new PrismaSessionStore(
-                prisma,
-                {
-                    checkPeriod: 2 * 60 * 1000,  //ms
-                    dbRecordIdIsSessionId: true,
-                    dbRecordIdFunction: undefined,
-                }
-            ),
-            secret: process.env.SESSION_SECRET as string,
-            resave: false,
-            saveUninitialized: false,
-            cookie: {
-                maxAge: 1000 * 60 * 60 * 24,
-                secure: process.env.NODE_ENV === "production",
-                sameSite: process.env.NODE_ENV === "production" ? "lax" : "lax",
-            }
-        }
-    )
-)
+// app.use(
+//     session(
+//         {
+//             store: new PrismaSessionStore(
+//                 prisma,
+//                 {
+//                     checkPeriod: 2 * 60 * 1000,  //ms
+//                     dbRecordIdIsSessionId: true,
+//                     dbRecordIdFunction: undefined,
+//                 }
+//             ),
+//             secret: process.env.SESSION_SECRET as string,
+//             resave: false,
+//             saveUninitialized: false,
+//             cookie: {
+//                 maxAge: 1000 * 60 * 60 * 24,
+//                 secure: process.env.NODE_ENV === "production",
+//                 sameSite: process.env.NODE_ENV === "production" ? "lax" : "lax",
+//             }
+//         }
+//     )
+// )
 
 passport.use(localStrategy)
 passport.use(jwtStrategy)
 app.use(passport.initialize())
-app.use(passport.session())
+// app.use(passport.session())
 
 app.use('/pose', routes.poses);
 app.use('/auth', routes.auth);
@@ -134,6 +134,6 @@ app.use((err: any, req: Request, res: Response, next: NextFunction) => {
     });
 });
 
-app.listen(port, (): void => {
+app.listen(port, "0.0.0.0", (): void => {
     console.log(`listening on port: ${port}`)
 })
