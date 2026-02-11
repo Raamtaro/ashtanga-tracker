@@ -20,7 +20,7 @@ import cors from "cors";
 dotenv.config();
 
 const app: Express = express();
-const port = Number(process.env.PORT) || 3000;
+const port = Number(process.env.PORT);
 
 if (process.env.NODE_ENV === 'production') {
     app.set('trust proxy', 1); // trust first proxy - for Railway deployments
