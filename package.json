@@ -11,7 +11,8 @@
     "seedPoses": "tsx ./src/seed/seed.ts",
     "seed30days": "tsx ./src/seed/backfill30days.ts",
     "clearSessions": "tsx ./src/seed/clearSessions.ts",
-    "clearPoses": "tsx ./src/seed/clearPoseData.ts"
+    "clearPoses": "tsx ./src/seed/clearPoseData.ts",
+    "migrate:deploy": "prisma migrate deploy"
   },
   "keywords": [],
   "author": "",
