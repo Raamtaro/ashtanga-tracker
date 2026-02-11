@@ -12,7 +12,7 @@
     "seed30days": "tsx ./src/seed/backfill30days.ts",
     "clearSessions": "tsx ./src/seed/clearSessions.ts",
     "clearPoses": "tsx ./src/seed/clearPoseData.ts",
-    "migrate:deploy": "prisma migrate deploy"
+    "migrate:deploy": "node ./src/modules/waitForDb.mjs && prisma migrate deploy"
   },
   "keywords": [],
   "author": "",
