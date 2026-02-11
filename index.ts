@@ -20,7 +20,7 @@ import cors from "cors";
 dotenv.config();
 
 const app: Express = express();
-const port = Number(process.env.PORT);
+const port = 3000
 
 if (process.env.NODE_ENV === 'production') {
     app.set('trust proxy', 1); // trust first proxy - for Railway deployments
@@ -103,7 +103,7 @@ app.use('/pose', routes.poses);
 app.use('/auth', routes.auth);
 app.use('/session', routes.session);
 app.use('/score-card', routes.scoreCard);
-app.use('/health', routes.health);
+// app.use('/health', routes.health);
 
 app.use((req, res) => {
     return res.status(404).json({ error: "Not found" });
