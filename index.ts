@@ -15,6 +15,7 @@ import { jwtStrategy } from "./src/config/passportJwt.js";
 // import prisma from "./src/lib/prisma.js";
 // import { PrismaSessionStore } from "@quixo3/prisma-session-store";
 import cors from "cors";
+import prisma from "./src/lib/prisma.js";
 
 
 dotenv.config();
@@ -134,6 +135,37 @@ app.use((err: any, req: Request, res: Response, next: NextFunction) => {
     });
 });
 
+
+
+
+
+
+/**
+ * I'm adding a reconnect function here that tries to re-establish the database connection if it's lost. This is a band-aid for now until I implement a more robust solution, but it should help reduce downtime in the meantime.
+ */
+
+async function connectWithRetry() {
+  let attempt = 0;
+  while (true) {
+    attempt++;
+    try {
+      await prisma.$connect();
+      console.log(`✅ Prisma connected (attempt ${attempt})`);
+      return;
+    } catch (e: any) {
+      const delay = Math.min(30_000, 1000 * 2 ** Math.min(attempt, 5));
+      console.log(`⚠️ Prisma connect failed (attempt ${attempt}). Retrying in ${delay}ms.`, e?.code ?? e?.message);
+      await new Promise(r => setTimeout(r, delay));
+    }
+  }
+}
+
+
 app.listen(port, "0.0.0.0", (): void => {
     console.log(`listening on port: ${port}`)
 })
+
+connectWithRetry().catch(e => {
+    console.error("Failed to connect to Prisma after multiple attempts:", e);
+    process.exit(1);
+});
