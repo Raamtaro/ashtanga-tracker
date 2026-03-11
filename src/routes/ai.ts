@@ -1,7 +1,7 @@
 import { Router } from "express";
 import passport from "passport";
 
-import { getPoseInsights } from "./controllers/ai";
+import { getPoseInsights } from "./controllers/ai.js";
 
 const router = Router();
 
