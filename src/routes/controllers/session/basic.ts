@@ -291,3 +291,26 @@ export async function listPosesBySegment(req: Request, res: Response) {
         res.status(400).json({ error: err?.message ?? 'Bad Request' });
     }
 }
+
+export async function deleteSession(req: Request, res: Response) {
+    const client = req.user as { id: string } | undefined;
+    if (!client?.id) return res.status(401).json({ message: "Unauthorized" });
+
+    const { id } = req.params;
+    if (!id) return res.status(400).json({ error: "Missing session id" });
+
+    try {
+        const deleted = await prisma.practiceSession.deleteMany({
+            where: { id, userId: client.id },
+        });
+
+        if (deleted.count === 0) {
+            return res.status(404).json({ error: "Session not found or no permission" });
+        }
+
+        return res.json({ message: "Session deleted" });
+    } catch (err) {
+        console.error("deleteSession error", err);
+        return res.status(500).json({ error: "Internal server error" });
+    }
+}
