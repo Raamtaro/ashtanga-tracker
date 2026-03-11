@@ -48,13 +48,13 @@ const poseInsightsBodySchema = z.object({
     days: z.coerce.number().int().min(1).max(MAX_POSE_INSIGHT_DAYS).optional(),
     timeZone: z.string().default("UTC"),
 }).superRefine((body, ctx) => {
-    if (!body.poseId && !body.poseSlug) {
-        ctx.addIssue({
-            code: z.ZodIssueCode.custom,
-            path: ["poseId"],
-            message: "Provide either poseId or poseSlug",
-        });
-    }
+    // if (!body.poseId && !body.poseSlug) {
+    //     ctx.addIssue({
+    //         code: z.ZodIssueCode.custom,
+    //         path: ["poseId"],
+    //         message: "Provide either poseId or poseSlug",
+    //     });
+    // }
 
     if (body.startDate && body.endDate && body.startDate > body.endDate) {
         ctx.addIssue({
