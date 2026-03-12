@@ -122,6 +122,7 @@ const presetBodySchema = z.object(
         date: z.coerce.date().optional(), // if not provided, will default to current date
         label: z.string().optional(),
         duration: z.number().min(1).optional(),
+        notes: z.string().optional(),
         practiceType: z.enum(PracticeType)
     }
 )
@@ -131,6 +132,7 @@ const customBodySchema = z.object(
         date: z.coerce.date().optional(), // if not provided, will default to current date
         label: z.string().optional(), // will add some logic for this to default to the combination of segments - i.e. Primary + Partial (Intermediate | Advanced (A | B) )
         duration: z.number().min(1).optional(),
+        notes: z.string().optional(),
         practiceType: z.literal(PracticeType.CUSTOM),
         sequenceSnippets: z.array(
             z.object(
@@ -231,12 +233,13 @@ async function buildSessionWithScoreCards(
         userId: string;
         date?: Date;
         label?: string;
+        notes?: string;
         duration?: number;
         practiceType: PracticeType;
         items: PlanItem[];
     }
 ) {
-    const { tx, userId, date, label, practiceType, items, duration } = params;
+    const { tx, userId, date, label, notes, practiceType, items, duration } = params;
 
     const session = await tx.practiceSession.create(
         {
@@ -244,6 +247,7 @@ async function buildSessionWithScoreCards(
                 userId,
                 date: date || new Date(),
                 label: label || `${practiceType} Practice - ${new Date().toLocaleDateString()}`,
+                notes: notes || null,
                 practiceType,
                 durationMinutes: duration || null,
                 status: 'DRAFT'
@@ -329,6 +333,7 @@ export const createPresetSession = async (req: Request, res: Response) => {
                     userId: client.id,
                     date: body.date,
                     label: body.label,
+                    notes: body.notes,
                     practiceType: body.practiceType,
                     items: planItems,
                     duration: body.duration
@@ -377,6 +382,7 @@ export const createCustomSession = async (req: Request, res: Response) => {
                     userId: client.id,
                     date: body.date,
                     label: body.label,
+                    notes: body.notes,
                     practiceType: body.practiceType,
                     items: planItems,
                     duration: body.duration
