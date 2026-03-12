@@ -3,8 +3,10 @@ import { Prisma } from "@prisma/client";
 import { Request, Response } from "express";
 import { z } from "zod";
 import { SequenceGroup } from "@prisma/client";
+import { METRIC_KEYS, type MetricKey } from "../../../lib/constants.js";
+import { metricStatsMap, summarizeNumericStats } from "../../../lib/insights/helpers.js";
 
-const REQUIRED_METRICS = ["ease", "comfort", "stability", "pain", "breath", "focus"] as const;
+const REQUIRED_METRICS = METRIC_KEYS;
 
 function computeCardOverall(sc: Record<(typeof REQUIRED_METRICS)[number], number | null>) {
     const nums = REQUIRED_METRICS
@@ -53,6 +55,7 @@ export const getSessionById = async (req: Request, res: Response) => {
             status: true,
             date: true,
             label: true,
+            notes: true,
             overallScore: true,
             scoreCards: {
                 orderBy: { orderInSession: 'asc' },
@@ -79,7 +82,7 @@ export const getSessionById = async (req: Request, res: Response) => {
 
     const scoreCards = session.scoreCards.map((c) => {
         const missingAny =
-            !c.skipped && REQUIRED_METRICS.some((k) => (c as any)[k] == null);
+            !c.skipped && REQUIRED_METRICS.some((k) => c[k] == null);
 
         const isComplete = c.skipped ? true : !missingAny;
 
@@ -106,6 +109,7 @@ export const getSessionById = async (req: Request, res: Response) => {
         session: {
             id: session.id,
             status: session.status,
+            notes: session.notes,
             date: session.date.toISOString(),
             overallScore: session.overallScore,
             summary,
@@ -113,6 +117,181 @@ export const getSessionById = async (req: Request, res: Response) => {
         },
     });
 };
+
+type StatsCardRow = {
+    id: string;
+    orderInSession: number;
+    segment: string | null;
+    side: string | null;
+    skipped: boolean;
+    overallScore: number | null;
+    ease: number | null;
+    comfort: number | null;
+    stability: number | null;
+    pain: number | null;
+    breath: number | null;
+    focus: number | null;
+    pose: {
+        id: string;
+        slug: string;
+        sanskritName: string;
+        sequenceGroup: SequenceGroup;
+    };
+};
+
+function buildGroupedStats(rows: StatsCardRow[], groupKey: (row: StatsCardRow) => string) {
+    const grouped = new Map<string, StatsCardRow[]>();
+
+    for (const row of rows) {
+        const key = groupKey(row);
+        const bucket = grouped.get(key) ?? [];
+        bucket.push(row);
+        grouped.set(key, bucket);
+    }
+
+    return [...grouped.entries()]
+        .map(([key, bucket]) => ({
+            key,
+            count: bucket.length,
+            overallScore: summarizeNumericStats(bucket.map((row) => row.overallScore)),
+            metrics: metricStatsMap(bucket, REQUIRED_METRICS),
+        }))
+        .sort((a, b) => b.count - a.count || a.key.localeCompare(b.key));
+}
+
+export async function getSessionStats(req: Request, res: Response) {
+    const client = req.user as { id: string } | undefined;
+    if (!client?.id) return res.status(401).json({ message: "Unauthorized" });
+
+    const { id } = req.params;
+    if (!id) return res.status(400).json({ error: "Missing session id" });
+
+    const session = await prisma.practiceSession.findFirst({
+        where: { id, userId: client.id },
+        select: {
+            id: true,
+            status: true,
+            date: true,
+            label: true,
+            practiceType: true,
+            durationMinutes: true,
+            overallScore: true,
+            scoreCards: {
+                orderBy: { orderInSession: "asc" },
+                select: {
+                    id: true,
+                    orderInSession: true,
+                    segment: true,
+                    side: true,
+                    skipped: true,
+                    overallScore: true,
+                    ease: true,
+                    comfort: true,
+                    stability: true,
+                    pain: true,
+                    breath: true,
+                    focus: true,
+                    pose: {
+                        select: {
+                            id: true,
+                            slug: true,
+                            sanskritName: true,
+                            sequenceGroup: true,
+                        },
+                    },
+                },
+            },
+        },
+    });
+
+    if (!session) return res.status(404).json({ error: "Session not found" });
+
+    const scoreCards: StatsCardRow[] = session.scoreCards.map((card) => ({
+        id: card.id,
+        orderInSession: card.orderInSession,
+        segment: card.segment,
+        side: card.side,
+        skipped: card.skipped,
+        overallScore: card.overallScore,
+        ease: card.ease,
+        comfort: card.comfort,
+        stability: card.stability,
+        pain: card.pain,
+        breath: card.breath,
+        focus: card.focus,
+        pose: card.pose,
+    }));
+
+    const activeCards = scoreCards.filter((card) => !card.skipped);
+
+    const completeCount = scoreCards.filter((card) =>
+        card.skipped || REQUIRED_METRICS.every((metric) => card[metric] != null),
+    ).length;
+
+    const incompleteCount = scoreCards.length - completeCount;
+
+    const bySegment = buildGroupedStats(
+        activeCards,
+        (card) => card.segment ?? "UNKNOWN",
+    );
+
+    const bySide = buildGroupedStats(
+        activeCards,
+        (card) => card.side ?? "NA",
+    );
+
+    const metrics = metricStatsMap(activeCards, REQUIRED_METRICS);
+
+    const responseShape: {
+        session: {
+            id: string;
+            status: string;
+            date: string;
+            label: string | null;
+            practiceType: string | null;
+            durationMinutes: number | null;
+            overallScore: number | null;
+        };
+        summary: {
+            totalScoreCards: number;
+            activeScoreCards: number;
+            skippedScoreCards: number;
+            completeScoreCards: number;
+            incompleteScoreCards: number;
+        };
+        statistics: {
+            overallScore: ReturnType<typeof summarizeNumericStats>;
+            metrics: Record<MetricKey, ReturnType<typeof summarizeNumericStats>>;
+            bySegment: ReturnType<typeof buildGroupedStats>;
+            bySide: ReturnType<typeof buildGroupedStats>;
+        };
+    } = {
+        session: {
+            id: session.id,
+            status: session.status,
+            date: session.date.toISOString(),
+            label: session.label,
+            practiceType: session.practiceType,
+            durationMinutes: session.durationMinutes,
+            overallScore: session.overallScore,
+        },
+        summary: {
+            totalScoreCards: scoreCards.length,
+            activeScoreCards: activeCards.length,
+            skippedScoreCards: scoreCards.length - activeCards.length,
+            completeScoreCards: completeCount,
+            incompleteScoreCards: incompleteCount,
+        },
+        statistics: {
+            overallScore: summarizeNumericStats(activeCards.map((card) => card.overallScore)),
+            metrics,
+            bySegment,
+            bySide,
+        },
+    };
+
+    return res.json(responseShape);
+}
 
 
 export async function getAllSessions(req: Request, res: Response) {
