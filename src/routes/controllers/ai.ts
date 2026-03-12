@@ -18,6 +18,7 @@ import {
     round,
     startOfUtcDay,
     startOfUtcWeek,
+    type NumericStats,
     summarizeNumericStats,
     weekdayShort,
 } from "../../lib/insights/helpers.js";
@@ -32,6 +33,18 @@ import {
 const REQUIRED_METRICS = METRIC_KEYS;
 const MAX_POSE_INSIGHT_DAYS = 90;
 const DEFAULT_POSE_INSIGHT_DAYS = 30;
+const PAIN_SCORE_MIN = 1;
+const PAIN_SCORE_MAX = 10;
+
+const PAIN_SCALE_METADATA = {
+    field: "pain",
+    scoreDirection: "higher_is_better",
+    bestScore: PAIN_SCORE_MAX,
+    worstScore: PAIN_SCORE_MIN,
+    description: "Pain score is inverted: 10 = least pain / best, 1 = most pain / worst.",
+    derivedField: "painSeverity",
+    derivedFormula: "painSeverity = 11 - pain",
+};
 
 const weeklyInsightsBodySchema = z.object({
     weekStartDate: z.coerce.date().optional(),
@@ -78,6 +91,29 @@ function parseModelJson(raw: string, fallback: Record<string, unknown>) {
 
 function avg(nums: Array<number | null | undefined>) {
     return average(nums);
+}
+
+function painSeverityFromScore(pain: number | null | undefined): number | null {
+    if (typeof pain !== "number") return null;
+    return (PAIN_SCORE_MAX + 1) - pain;
+}
+
+function painSeverityFromAverage(avgPain: number | null): number | null {
+    if (typeof avgPain !== "number") return null;
+    return round((PAIN_SCORE_MAX + 1) - avgPain, 2);
+}
+
+function toPainSeverityStats(stats: NumericStats): NumericStats {
+    if (stats.count === 0) return stats;
+
+    return {
+        count: stats.count,
+        average: painSeverityFromAverage(stats.average),
+        stdDev: stats.stdDev,
+        min: painSeverityFromAverage(stats.max),
+        max: painSeverityFromAverage(stats.min),
+        median: painSeverityFromAverage(stats.median),
+    };
 }
 
 async function runJsonInsightPrompt(
@@ -362,13 +398,14 @@ export const getSessionAiInsight = async (req: Request, res: Response) => {
 
         const painHotSpots = [...activeCards]
             .filter((c) => typeof c.metrics.pain === "number")
-            .sort((a, b) => (b.metrics.pain ?? -1) - (a.metrics.pain ?? -1))
+            .sort((a, b) => (a.metrics.pain ?? 99) - (b.metrics.pain ?? 99))
             .slice(0, 5)
             .map((c) => ({
                 scoreCardId: c.id,
                 pose: c.pose.sanskritName,
                 side: c.side,
                 pain: c.metrics.pain,
+                painSeverity: painSeverityFromScore(c.metrics.pain),
                 notes: c.notes ?? null,
             }));
 
@@ -392,7 +429,11 @@ export const getSessionAiInsight = async (req: Request, res: Response) => {
             summary,
             computed: {
                 metricAverages,
+                painSeverityAverage: painSeverityFromAverage(metricAverages.pain),
                 painHotSpots,
+            },
+            scales: {
+                pain: PAIN_SCALE_METADATA,
             },
             scoreCards: scoreCards.map((c) => ({
                 id: c.id,
@@ -401,7 +442,10 @@ export const getSessionAiInsight = async (req: Request, res: Response) => {
                 side: c.side,
                 skipped: c.skipped,
                 overallScore: c.overallScore,
-                metrics: c.metrics,
+                metrics: {
+                    ...c.metrics,
+                    painSeverity: painSeverityFromScore(c.metrics.pain),
+                },
                 notes: c.notes,
             })),
         };
@@ -418,7 +462,9 @@ Return STRICT JSON with keys:
 
 Constraints:
 - No medical diagnosis.
-- If pain is high or notes suggest injury, recommend caution and professional guidance.
+- Pain score is inverted: 10 = least pain (best), 1 = most pain (worst).
+- Treat lower pain score (or higher painSeverity) as higher pain concern.
+- If pain score is low or notes suggest injury, recommend caution and professional guidance.
 `.trim();
 
         const completion = await runJsonInsightPrompt(
@@ -535,6 +581,33 @@ export const getWeeklyInsights = async (req: Request, res: Response) => {
             comparison,
         });
 
+        const llmInputForModel = {
+            ...llmInput,
+            scales: {
+                pain: PAIN_SCALE_METADATA,
+            },
+            derived: {
+                currentWeek: {
+                    painSeverityStats: toPainSeverityStats(llmInput.currentWeek.metricStats.pain),
+                    byDayPart: llmInput.currentWeek.dayPartSummaries.map((item) => ({
+                        dayPart: item.dayPart,
+                        averagePainScore: item.averagePain,
+                        averagePainSeverity: painSeverityFromAverage(item.averagePain),
+                    })),
+                },
+                previousWeek: llmInput.previousWeek
+                    ? {
+                        painSeverityStats: toPainSeverityStats(llmInput.previousWeek.metricStats.pain),
+                        byDayPart: llmInput.previousWeek.dayPartSummaries.map((item) => ({
+                            dayPart: item.dayPart,
+                            averagePainScore: item.averagePain,
+                            averagePainSeverity: painSeverityFromAverage(item.averagePain),
+                        })),
+                    }
+                    : null,
+            },
+        };
+
         const systemPrompt = `
 You are a careful yoga weekly insights assistant.
 Analyze weekly practice trends and compare current vs previous week when available.
@@ -549,12 +622,14 @@ Return STRICT JSON with keys:
 Constraints:
 - Ground claims in data provided.
 - Mention uncertainty when sample size is low.
+- Pain score is inverted: 10 = least pain (best), 1 = most pain (worst).
+- Treat lower pain score (or higher painSeverity) as higher pain concern.
 - No medical diagnosis.
 `.trim();
 
         const aiResult = await runJsonInsightPrompt(
             systemPrompt,
-            llmInput,
+            llmInputForModel,
             { summary: "Could not generate weekly insights.", patterns: [], comparisons: [], cautions: [], nextWeekFocus: [] },
         );
 
@@ -776,6 +851,33 @@ export const getPoseInsights = async (req: Request, res: Response) => {
             timeSeries,
         });
 
+        const llmInputForModel = {
+            ...llmInput,
+            scales: {
+                pain: PAIN_SCALE_METADATA,
+            },
+            derived: {
+                summary: {
+                    painSeverityStats: toPainSeverityStats(llmInput.summary.metricStats.pain),
+                    byDayPart: llmInput.summary.byDayPart.map((item) => ({
+                        dayPart: item.dayPart,
+                        averagePainScore: item.averagePain,
+                        averagePainSeverity: painSeverityFromAverage(item.averagePain),
+                    })),
+                    sideBreakdown: llmInput.summary.sideBreakdown.map((item) => ({
+                        side: item.side,
+                        painScoreStats: item.painStats,
+                        painSeverityStats: toPainSeverityStats(item.painStats),
+                    })),
+                },
+                timeSeries: llmInput.timeSeries.map((item) => ({
+                    date: item.date,
+                    averagePainScore: item.averagePain,
+                    averagePainSeverity: painSeverityFromAverage(item.averagePain),
+                })),
+            },
+        };
+
         const systemPrompt = `
 You are a careful yoga pose-specific insights assistant.
 Analyze performance trends for one pose over time.
@@ -791,12 +893,14 @@ Return STRICT JSON with keys:
 Constraints:
 - Use only provided data.
 - Explicitly acknowledge low sample size.
+- Pain score is inverted: 10 = least pain (best), 1 = most pain (worst).
+- Treat lower pain score (or higher painSeverity) as higher pain concern.
 - No medical diagnosis.
 `.trim();
 
         const aiResult = await runJsonInsightPrompt(
             systemPrompt,
-            llmInput,
+            llmInputForModel,
             {
                 summary: "Could not generate pose insights.",
                 trendAssessment: [],
