@@ -28,6 +28,8 @@ model User {
   password  String // hashed!
   profile   Profile?
   sessions  PracticeSession[]
+  poseInsights PoseInsight[]
+  weeklyInsights WeeklyInsight[]
   createdAt DateTime          @default(now())
   updatedAt DateTime          @updatedAt
 }
@@ -76,7 +78,8 @@ model Pose {
   orderInGroup  Int? // canonical order within that group
   isTwoSided    Boolean       @default(false)
 
-  scoreCards ScoreCard[]
+  scoreCards    ScoreCard[]
+  poseInsights  PoseInsight[]
 }
 
 enum SequenceGroup {
@@ -163,6 +166,56 @@ model ScoreCard {
 
   @@index([sessionId])
   @@index([poseId])
+}
+
+model PoseInsight {
+  id String @id @default(cuid())
+
+  pose   Pose   @relation(fields: [poseId], references: [id], onDelete: Cascade)
+  poseId String
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId String
+
+  timeframeStart        DateTime
+  timeframeEndExclusive DateTime
+  totalDays             Int
+  timeZone              String   @default("UTC")
+
+  computed Json?
+  llmInput Json?
+  ai       Json
+  model    String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, poseId, timeframeStart, timeframeEndExclusive, timeZone])
+  @@index([userId, createdAt])
+}
+
+model WeeklyInsight {
+  id String @id @default(cuid())
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId String
+
+  weekStart        DateTime
+  weekEndExclusive DateTime
+  weekStartsOn     String   @default("MONDAY")
+  timeZone         String   @default("UTC")
+  includeDrafts    Boolean  @default(false)
+
+  computed Json?
+  llmInput Json?
+  ai       Json
+  model    String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, weekStart, weekEndExclusive, weekStartsOn, timeZone, includeDrafts])
+  @@index([userId, createdAt])
 }
 
 enum SequenceSegment {
