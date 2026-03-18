@@ -32,7 +32,6 @@ export async function getWeeklyInsightsResponse(userId: string, body: WeeklyInsi
     });
 
     if (cachedInsight) {
-        console.log('Already have cached insight for this window, returning it. Insight ID:', cachedInsight.id); //Comment out later
         return {
             window: {
                 currentWeek: {
@@ -72,6 +71,55 @@ export async function getWeeklyInsightsResponse(userId: string, body: WeeklyInsi
     });
 
     if (generatedThisWeek >= WEEKLY_INSIGHT_WEEKLY_LIMIT) {
+        const quotaFallbackInsight = await prisma.weeklyInsight.findFirst({
+            where: {
+                userId,
+                weekStart: window.currentStart,
+                weekEndExclusive: window.currentEndExclusive,
+            },
+            orderBy: { createdAt: "desc" },
+        });
+
+        if (quotaFallbackInsight) {
+            return {
+                window: {
+                    currentWeek: {
+                        start: window.currentStart.toISOString(),
+                        endExclusive: window.currentEndExclusive.toISOString(),
+                    },
+                    previousWeek: {
+                        start: window.previousStart.toISOString(),
+                        endExclusive: window.previousEndExclusive.toISOString(),
+                    },
+                },
+                computed: quotaFallbackInsight.computed,
+                llmInput: quotaFallbackInsight.llmInput,
+                ai: quotaFallbackInsight.ai,
+                meta: {
+                    source: "quota_fallback",
+                    insightId: quotaFallbackInsight.id,
+                    createdAt: quotaFallbackInsight.createdAt.toISOString(),
+                    warning: "Weekly generation quota reached; returning existing insight for this week.",
+                    request: {
+                        weekStartsOn: body.weekStartsOn,
+                        timeZone: body.timeZone,
+                        includeDrafts: body.includeDrafts,
+                    },
+                    returnedInsightConfig: {
+                        weekStartsOn: quotaFallbackInsight.weekStartsOn,
+                        timeZone: quotaFallbackInsight.timeZone,
+                        includeDrafts: quotaFallbackInsight.includeDrafts,
+                    },
+                    quota: {
+                        limit: WEEKLY_INSIGHT_WEEKLY_LIMIT,
+                        consumed: generatedThisWeek,
+                        remaining: 0,
+                        resetsAt: quotaWindow.endExclusive.toISOString(),
+                    },
+                },
+            };
+        }
+
         throw new HttpError(
             429,
             "Weekly insight generation limit reached for this week.",
