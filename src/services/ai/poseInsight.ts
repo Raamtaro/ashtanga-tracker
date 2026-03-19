@@ -27,6 +27,7 @@ import {
 
 export async function getPoseInsightsResponse(userId: string, poseIdParam: string | undefined, body: PoseInsightsBody) {
     const window = resolvePoseWindow(body);
+    const now = new Date();
 
     const pose = await prisma.pose.findFirst({
         where: poseIdParam ? { id: poseIdParam } : { slug: body.poseSlug },
@@ -54,7 +55,6 @@ export async function getPoseInsightsResponse(userId: string, poseIdParam: strin
     });
 
     if (cachedInsight) {
-        console.log('Already have cached insight for this window, returning it. Insight ID:', cachedInsight.id); //Comment out later
         return {
             pose,
             timeframe: {
@@ -69,6 +69,54 @@ export async function getPoseInsightsResponse(userId: string, poseIdParam: strin
                 source: "cache",
                 insightId: cachedInsight.id,
                 createdAt: cachedInsight.createdAt.toISOString(),
+                quota: {
+                    limit: POSE_INSIGHT_WEEKLY_LIMIT,
+                    consumed: null,
+                    note: "Cached report reused; no new generation consumed.",
+                },
+            },
+        };
+    }
+
+    const recentCacheStart = new Date(now.getTime() - (7 * 24 * 60 * 60 * 1000));
+    const recentPoseInsight = await prisma.poseInsight.findFirst({
+        where: {
+            userId,
+            poseId: pose.id,
+            createdAt: {
+                gte: recentCacheStart,
+            },
+        },
+        orderBy: { createdAt: "desc" },
+    });
+
+    if (recentPoseInsight) {
+        const nextPoseEligibleAt = new Date(recentPoseInsight.createdAt.getTime() + (7 * 24 * 60 * 60 * 1000));
+
+        return {
+            pose,
+            timeframe: {
+                start: recentPoseInsight.timeframeStart.toISOString(),
+                endExclusive: recentPoseInsight.timeframeEndExclusive.toISOString(),
+                totalDays: recentPoseInsight.totalDays,
+            },
+            computed: recentPoseInsight.computed,
+            llmInput: recentPoseInsight.llmInput,
+            ai: recentPoseInsight.ai,
+            meta: {
+                source: "pose_recent_cache",
+                insightId: recentPoseInsight.id,
+                createdAt: recentPoseInsight.createdAt.toISOString(),
+                warning: "Recent pose insight reused; no new generation consumed.",
+                request: {
+                    timeframe: {
+                        start: window.start.toISOString(),
+                        endExclusive: window.endExclusive.toISOString(),
+                        totalDays: window.totalDays,
+                    },
+                    timeZone: body.timeZone,
+                },
+                nextPoseEligibleAt: nextPoseEligibleAt.toISOString(),
                 quota: {
                     limit: POSE_INSIGHT_WEEKLY_LIMIT,
                     consumed: null,
