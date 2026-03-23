@@ -105,6 +105,7 @@ app.use('/auth', routes.auth);
 app.use('/session', routes.session);
 app.use('/score-card', routes.scoreCard);
 app.use('/health', routes.health);
+app.use('/ai/insights', routes.aiInsights);
 app.use('/ai', routes.ai)
 
 app.use((req, res) => {

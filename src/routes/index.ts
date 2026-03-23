@@ -3,6 +3,7 @@ import session from './session.js';
 import auth from './auth.js';
 import scoreCard from './scoreCard.js';
 import ai from './ai.js';
+import aiInsights from './aiInsights.js';
 import health from './health.js';
 
 export default {
@@ -11,5 +12,6 @@ export default {
     session,
     scoreCard,
     health,
-    ai
+    ai,
+    aiInsights,
 };
