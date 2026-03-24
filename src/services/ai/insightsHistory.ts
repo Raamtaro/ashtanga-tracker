@@ -25,6 +25,7 @@ export const insightsHistoryQuerySchema = z.object({
     from: z.coerce.date().optional(),
     to: z.coerce.date().optional(),
     poseId: z.string().min(1).optional(),
+    includeDebug: z.coerce.boolean().default(false),
 }).superRefine((input, ctx) => {
     if (input.from && input.to && input.from > input.to) {
         ctx.addIssue({
@@ -48,31 +49,75 @@ export const insightDetailParamsSchema = z.object({
     id: z.string().min(1),
 });
 
+export const insightDetailQuerySchema = z.object({
+    includeDebug: z.coerce.boolean().default(false),
+});
+
 type InsightsHistoryQuery = z.infer<typeof insightsHistoryQuerySchema>;
 type InsightDetailParams = z.infer<typeof insightDetailParamsSchema>;
+type InsightDetailQuery = z.infer<typeof insightDetailQuerySchema>;
 type CursorPayload = z.infer<typeof cursorSchema>;
 
-type InsightHistoryItem = {
-    id: string;
-    type: InsightType;
-    createdAt: string;
-    window: {
-        start: string;
-        endExclusive: string;
-        totalDays: number | null;
-        weekStartsOn: string | null;
-        timeZone: string;
-        includeDrafts: boolean | null;
-    };
-    summaryPreview: string | null;
-    source: "generated";
+type InsightDebugFields = {
+    computed: Prisma.JsonValue | null;
+    llmInput: Prisma.JsonValue | null;
+};
+
+type PoseHistoryItem = {
+    type: "pose";
     pose: {
         id: string;
         slug: string;
         sanskritName: string;
         englishName: string | null;
-    } | null;
-};
+    };
+    timeframe: {
+        start: string;
+        endExclusive: string;
+        totalDays: number;
+    };
+    ai: {
+        summary: string | null;
+    };
+    meta: {
+        source: "stored";
+        insightId: string;
+        createdAt: string;
+        model: string | null;
+        debugIncluded: boolean;
+    };
+} & Partial<InsightDebugFields>;
+
+type WeeklyHistoryItem = {
+    type: "weekly";
+    window: {
+        currentWeek: {
+            start: string;
+            endExclusive: string;
+        };
+        previousWeek: {
+            start: string;
+            endExclusive: string;
+        };
+    };
+    ai: {
+        summary: string | null;
+    };
+    meta: {
+        source: "stored";
+        insightId: string;
+        createdAt: string;
+        model: string | null;
+        debugIncluded: boolean;
+        requestConfig: {
+            weekStartsOn: string;
+            timeZone: string;
+            includeDrafts: boolean;
+        };
+    };
+} & Partial<InsightDebugFields>;
+
+type InsightHistoryItem = PoseHistoryItem | WeeklyHistoryItem;
 
 function encodeCursor(payload: CursorPayload) {
     return Buffer.from(JSON.stringify(payload)).toString("base64url");
@@ -89,6 +134,10 @@ function decodeCursor(rawCursor: string | undefined): CursorPayload | undefined 
     } catch {
         throw new HttpError(400, "Invalid cursor");
     }
+}
+
+function addDays(date: Date, days: number) {
+    return new Date(date.getTime() + (days * 24 * 60 * 60 * 1000));
 }
 
 function toDateTimeFilter(from: Date | undefined, to: Date | undefined): Prisma.DateTimeFilter | undefined {
@@ -147,13 +196,13 @@ function extractSummaryPreview(ai: Prisma.JsonValue) {
 }
 
 function compareHistoryItemsDesc(a: InsightHistoryItem, b: InsightHistoryItem) {
-    const dateDiff = new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+    const dateDiff = new Date(b.meta.createdAt).getTime() - new Date(a.meta.createdAt).getTime();
     if (dateDiff !== 0) return dateDiff;
 
     const rankDiff = insightTypeRank[b.type] - insightTypeRank[a.type];
     if (rankDiff !== 0) return rankDiff;
 
-    return b.id.localeCompare(a.id);
+    return b.meta.insightId.localeCompare(a.meta.insightId);
 }
 
 function mapPoseInsightRow(row: {
@@ -170,22 +219,34 @@ function mapPoseInsightRow(row: {
         sanskritName: string;
         englishName: string | null;
     };
-}): InsightHistoryItem {
+    model: string | null;
+    computed: Prisma.JsonValue | null;
+    llmInput: Prisma.JsonValue | null;
+}, includeDebug: boolean): InsightHistoryItem {
     return {
-        id: row.id,
         type: "pose",
-        createdAt: row.createdAt.toISOString(),
-        window: {
+        pose: row.pose,
+        timeframe: {
             start: row.timeframeStart.toISOString(),
             endExclusive: row.timeframeEndExclusive.toISOString(),
             totalDays: row.totalDays,
-            weekStartsOn: null,
-            timeZone: row.timeZone,
-            includeDrafts: null,
         },
-        summaryPreview: extractSummaryPreview(row.ai),
-        source: "generated",
-        pose: row.pose,
+        ai: {
+            summary: extractSummaryPreview(row.ai),
+        },
+        meta: {
+            source: "stored",
+            insightId: row.id,
+            createdAt: row.createdAt.toISOString(),
+            model: row.model,
+            debugIncluded: includeDebug,
+        },
+        ...(includeDebug
+            ? {
+                computed: row.computed,
+                llmInput: row.llmInput,
+            }
+            : {}),
     };
 }
 
@@ -198,22 +259,45 @@ function mapWeeklyInsightRow(row: {
     timeZone: string;
     includeDrafts: boolean;
     ai: Prisma.JsonValue;
-}): InsightHistoryItem {
+    model: string | null;
+    computed: Prisma.JsonValue | null;
+    llmInput: Prisma.JsonValue | null;
+}, includeDebug: boolean): InsightHistoryItem {
+    const previousWeekStart = addDays(row.weekStart, -7);
+
     return {
-        id: row.id,
         type: "weekly",
-        createdAt: row.createdAt.toISOString(),
         window: {
-            start: row.weekStart.toISOString(),
-            endExclusive: row.weekEndExclusive.toISOString(),
-            totalDays: null,
-            weekStartsOn: row.weekStartsOn,
-            timeZone: row.timeZone,
-            includeDrafts: row.includeDrafts,
+            currentWeek: {
+                start: row.weekStart.toISOString(),
+                endExclusive: row.weekEndExclusive.toISOString(),
+            },
+            previousWeek: {
+                start: previousWeekStart.toISOString(),
+                endExclusive: row.weekStart.toISOString(),
+            },
         },
-        summaryPreview: extractSummaryPreview(row.ai),
-        source: "generated",
-        pose: null,
+        ai: {
+            summary: extractSummaryPreview(row.ai),
+        },
+        meta: {
+            source: "stored",
+            insightId: row.id,
+            createdAt: row.createdAt.toISOString(),
+            model: row.model,
+            debugIncluded: includeDebug,
+            requestConfig: {
+                weekStartsOn: row.weekStartsOn,
+                timeZone: row.timeZone,
+                includeDrafts: row.includeDrafts,
+            },
+        },
+        ...(includeDebug
+            ? {
+                computed: row.computed,
+                llmInput: row.llmInput,
+            }
+            : {}),
     };
 }
 
@@ -263,6 +347,9 @@ export async function getInsightsHistoryResponse(userId: string, query: Insights
                     timeframeEndExclusive: true,
                     totalDays: true,
                     timeZone: true,
+                    model: true,
+                    computed: true,
+                    llmInput: true,
                     ai: true,
                     pose: {
                         select: {
@@ -288,6 +375,9 @@ export async function getInsightsHistoryResponse(userId: string, query: Insights
                     weekStartsOn: true,
                     timeZone: true,
                     includeDrafts: true,
+                    model: true,
+                    computed: true,
+                    llmInput: true,
                     ai: true,
                 },
             })
@@ -295,8 +385,8 @@ export async function getInsightsHistoryResponse(userId: string, query: Insights
     ]);
 
     const combined = [
-        ...poseRows.map(mapPoseInsightRow),
-        ...weeklyRows.map(mapWeeklyInsightRow),
+        ...poseRows.map((row) => mapPoseInsightRow(row, query.includeDebug)),
+        ...weeklyRows.map((row) => mapWeeklyInsightRow(row, query.includeDebug)),
     ].sort(compareHistoryItemsDesc);
 
     const data = combined.slice(0, query.limit);
@@ -304,9 +394,9 @@ export async function getInsightsHistoryResponse(userId: string, query: Insights
     const lastItem = data[data.length - 1];
     const nextCursor = hasMore && lastItem
         ? encodeCursor({
-            createdAt: lastItem.createdAt,
+            createdAt: lastItem.meta.createdAt,
             type: lastItem.type,
-            id: lastItem.id,
+            id: lastItem.meta.insightId,
         })
         : null;
 
@@ -322,6 +412,7 @@ export async function getInsightsHistoryResponse(userId: string, query: Insights
             poseId: query.poseId ?? null,
             from: query.from?.toISOString() ?? null,
             to: query.to?.toISOString() ?? null,
+            includeDebug: query.includeDebug,
         },
     };
 }
@@ -333,7 +424,11 @@ function extractGenerationContext(llmInput: Prisma.JsonValue) {
     return context;
 }
 
-export async function getInsightDetailResponse(userId: string, params: InsightDetailParams) {
+export async function getInsightDetailResponse(
+    userId: string,
+    params: InsightDetailParams,
+    query: InsightDetailQuery,
+) {
     if (params.type === "pose") {
         const insight = await prisma.poseInsight.findFirst({
             where: {
@@ -366,30 +461,32 @@ export async function getInsightDetailResponse(userId: string, params: InsightDe
         if (!insight) throw new HttpError(404, "Insight not found");
 
         return {
-            insight: {
-                id: insight.id,
-                type: "pose",
+            pose: insight.pose,
+            timeframe: {
+                start: insight.timeframeStart.toISOString(),
+                endExclusive: insight.timeframeEndExclusive.toISOString(),
+                totalDays: insight.totalDays,
+            },
+            ai: insight.ai,
+            meta: {
+                source: "stored",
+                insightId: insight.id,
                 createdAt: insight.createdAt.toISOString(),
                 updatedAt: insight.updatedAt.toISOString(),
                 model: insight.model,
-                pose: insight.pose,
-                window: {
-                    start: insight.timeframeStart.toISOString(),
-                    endExclusive: insight.timeframeEndExclusive.toISOString(),
-                    totalDays: insight.totalDays,
-                    weekStartsOn: null,
-                    timeZone: insight.timeZone,
-                    includeDrafts: null,
-                },
-                computed: insight.computed,
-                llmInput: insight.llmInput,
-                ai: insight.ai,
-                meta: {
-                    source: "stored",
-                    summaryPreview: extractSummaryPreview(insight.ai),
-                    generationContext: extractGenerationContext(insight.llmInput),
-                },
+                timeZone: insight.timeZone,
+                summaryPreview: extractSummaryPreview(insight.ai),
+                debugIncluded: query.includeDebug,
+                ...(query.includeDebug
+                    ? { generationContext: extractGenerationContext(insight.llmInput) }
+                    : {}),
             },
+            ...(query.includeDebug
+                ? {
+                    computed: insight.computed,
+                    llmInput: insight.llmInput,
+                }
+                : {}),
         };
     }
 
@@ -417,29 +514,39 @@ export async function getInsightDetailResponse(userId: string, params: InsightDe
     if (!insight) throw new HttpError(404, "Insight not found");
 
     return {
-        insight: {
-            id: insight.id,
-            type: "weekly",
+        window: {
+            currentWeek: {
+                start: insight.weekStart.toISOString(),
+                endExclusive: insight.weekEndExclusive.toISOString(),
+            },
+            previousWeek: {
+                start: addDays(insight.weekStart, -7).toISOString(),
+                endExclusive: insight.weekStart.toISOString(),
+            },
+        },
+        ai: insight.ai,
+        meta: {
+            source: "stored",
+            insightId: insight.id,
             createdAt: insight.createdAt.toISOString(),
             updatedAt: insight.updatedAt.toISOString(),
             model: insight.model,
-            pose: null,
-            window: {
-                start: insight.weekStart.toISOString(),
-                endExclusive: insight.weekEndExclusive.toISOString(),
-                totalDays: null,
+            requestConfig: {
                 weekStartsOn: insight.weekStartsOn,
                 timeZone: insight.timeZone,
                 includeDrafts: insight.includeDrafts,
             },
-            computed: insight.computed,
-            llmInput: insight.llmInput,
-            ai: insight.ai,
-            meta: {
-                source: "stored",
-                summaryPreview: extractSummaryPreview(insight.ai),
-                generationContext: extractGenerationContext(insight.llmInput),
-            },
+            summaryPreview: extractSummaryPreview(insight.ai),
+            debugIncluded: query.includeDebug,
+            ...(query.includeDebug
+                ? { generationContext: extractGenerationContext(insight.llmInput) }
+                : {}),
         },
+        ...(query.includeDebug
+            ? {
+                computed: insight.computed,
+                llmInput: insight.llmInput,
+            }
+            : {}),
     };
 }

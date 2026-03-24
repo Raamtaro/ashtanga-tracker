@@ -5,6 +5,7 @@ import {
     getInsightDetailResponse,
     getInsightsHistoryResponse,
     insightDetailParamsSchema,
+    insightDetailQuerySchema,
     insightsHistoryQuerySchema,
 } from "../../services/ai/insightsHistory.js";
 
@@ -53,9 +54,10 @@ export const getInsightDetail = async (req: Request, res: Response) => {
     if (!client?.id) return res.status(401).json({ error: "Unauthorized" });
 
     const params = insightDetailParamsSchema.parse(req.params ?? {});
+    const query = insightDetailQuerySchema.parse(req.query ?? {});
 
     try {
-        const response = await getInsightDetailResponse(client.id, params);
+        const response = await getInsightDetailResponse(client.id, params, query);
         return res.json(response);
     } catch (err) {
         console.error("getInsightDetail error", err);
