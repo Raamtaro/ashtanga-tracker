@@ -9,6 +9,18 @@ import {
     insightsHistoryQuerySchema,
 } from "../../services/ai/insightsHistory.js";
 
+function validationFailedBody(issues: Array<{ path: PropertyKey[]; message: string }>) {
+    return {
+        error: "Validation failed",
+        issues: issues.map((issue) => ({
+            path: issue.path
+                .map((part) => typeof part === "symbol" ? String(part) : String(part))
+                .join("."),
+            message: issue.message,
+        })),
+    };
+}
+
 function resolveError(err: unknown) {
     if (err instanceof HttpError) {
         return {
@@ -37,10 +49,13 @@ export const getInsightsHistory = async (req: Request, res: Response) => {
     const client = req.user as { id: string } | undefined;
     if (!client?.id) return res.status(401).json({ error: "Unauthorized" });
 
-    const query = insightsHistoryQuerySchema.parse(req.query ?? {});
+    const queryResult = insightsHistoryQuerySchema.safeParse(req.query ?? {});
+    if (!queryResult.success) {
+        return res.status(400).json(validationFailedBody(queryResult.error.issues));
+    }
 
     try {
-        const response = await getInsightsHistoryResponse(client.id, query);
+        const response = await getInsightsHistoryResponse(client.id, queryResult.data);
         return res.json(response);
     } catch (err) {
         console.error("getInsightsHistory error", err);
@@ -53,11 +68,18 @@ export const getInsightDetail = async (req: Request, res: Response) => {
     const client = req.user as { id: string } | undefined;
     if (!client?.id) return res.status(401).json({ error: "Unauthorized" });
 
-    const params = insightDetailParamsSchema.parse(req.params ?? {});
-    const query = insightDetailQuerySchema.parse(req.query ?? {});
+    const paramsResult = insightDetailParamsSchema.safeParse(req.params ?? {});
+    if (!paramsResult.success) {
+        return res.status(400).json(validationFailedBody(paramsResult.error.issues));
+    }
+
+    const queryResult = insightDetailQuerySchema.safeParse(req.query ?? {});
+    if (!queryResult.success) {
+        return res.status(400).json(validationFailedBody(queryResult.error.issues));
+    }
 
     try {
-        const response = await getInsightDetailResponse(client.id, params, query);
+        const response = await getInsightDetailResponse(client.id, paramsResult.data, queryResult.data);
         return res.json(response);
     } catch (err) {
         console.error("getInsightDetail error", err);

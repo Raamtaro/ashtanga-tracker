@@ -18,28 +18,47 @@ const cursorSchema = z.object({
     id: z.string().min(1),
 });
 
+const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
 export const insightsHistoryQuerySchema = z.object({
     type: z.enum(INSIGHT_TYPES).optional(),
     limit: z.coerce.number().int().positive().max(100).default(20),
     cursor: z.string().optional(),
-    from: z.coerce.date().optional(),
-    to: z.coerce.date().optional(),
+    from: z.string().optional(),
+    to: z.string().optional(),
     poseId: z.string().min(1).optional(),
+    timeZone: z.string().default("UTC"),
     includeDebug: z.coerce.boolean().default(false),
 }).superRefine((input, ctx) => {
-    if (input.from && input.to && input.from > input.to) {
-        ctx.addIssue({
-            code: z.ZodIssueCode.custom,
-            path: ["to"],
-            message: "to must be on or after from",
-        });
-    }
-
     if (input.poseId && input.type === "weekly") {
         ctx.addIssue({
             code: z.ZodIssueCode.custom,
             path: ["poseId"],
             message: "poseId is only supported when type is pose or omitted",
+        });
+    }
+
+    if (input.from && !isValidDateQueryInput(input.from)) {
+        ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["from"],
+            message: "from must be a valid ISO datetime or YYYY-MM-DD date",
+        });
+    }
+
+    if (input.to && !isValidDateQueryInput(input.to)) {
+        ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["to"],
+            message: "to must be a valid ISO datetime or YYYY-MM-DD date",
+        });
+    }
+
+    if (!isValidTimeZone(input.timeZone)) {
+        ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["timeZone"],
+            message: "Invalid IANA time zone",
         });
     }
 });
@@ -64,6 +83,8 @@ type InsightDebugFields = {
 };
 
 type PoseHistoryItem = {
+    id: string;
+    createdAt: string;
     type: "pose";
     pose: {
         id: string;
@@ -89,6 +110,8 @@ type PoseHistoryItem = {
 } & Partial<InsightDebugFields>;
 
 type WeeklyHistoryItem = {
+    id: string;
+    createdAt: string;
     type: "weekly";
     window: {
         currentWeek: {
@@ -140,10 +163,164 @@ function addDays(date: Date, days: number) {
     return new Date(date.getTime() + (days * 24 * 60 * 60 * 1000));
 }
 
-function toDateTimeFilter(from: Date | undefined, to: Date | undefined): Prisma.DateTimeFilter | undefined {
+function isValidDateQueryInput(value: string) {
+    if (DATE_ONLY_PATTERN.test(value)) return true;
+    const parsed = new Date(value);
+    return !Number.isNaN(parsed.getTime());
+}
+
+function isValidTimeZone(timeZone: string) {
+    try {
+        new Intl.DateTimeFormat("en-US", { timeZone }).format(new Date());
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+function assertValidTimeZone(timeZone: string) {
+    try {
+        new Intl.DateTimeFormat("en-US", { timeZone }).format(new Date());
+    } catch {
+        throw new HttpError(400, "Invalid timeZone");
+    }
+}
+
+function getTimeZoneParts(date: Date, timeZone: string) {
+    const formatter = new Intl.DateTimeFormat("en-US", {
+        timeZone,
+        hour12: false,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+    });
+
+    const map = new Map(
+        formatter
+            .formatToParts(date)
+            .filter((part) => part.type !== "literal")
+            .map((part) => [part.type, part.value]),
+    );
+
+    return {
+        year: Number(map.get("year")),
+        month: Number(map.get("month")),
+        day: Number(map.get("day")),
+        hour: Number(map.get("hour")),
+        minute: Number(map.get("minute")),
+        second: Number(map.get("second")),
+    };
+}
+
+function zonedDateTimeToUtc(
+    input: { year: number; month: number; day: number; hour: number; minute: number; second: number },
+    timeZone: string,
+) {
+    const utcGuess = Date.UTC(
+        input.year,
+        input.month - 1,
+        input.day,
+        input.hour,
+        input.minute,
+        input.second,
+    );
+
+    const tzParts = getTimeZoneParts(new Date(utcGuess), timeZone);
+    const asUtcMs = Date.UTC(
+        tzParts.year,
+        tzParts.month - 1,
+        tzParts.day,
+        tzParts.hour,
+        tzParts.minute,
+        tzParts.second,
+    );
+
+    const offsetMs = asUtcMs - utcGuess;
+    return new Date(utcGuess - offsetMs);
+}
+
+function nextDayYmd(year: number, month: number, day: number) {
+    const utc = new Date(Date.UTC(year, month - 1, day));
+    utc.setUTCDate(utc.getUTCDate() + 1);
+
+    return {
+        year: utc.getUTCFullYear(),
+        month: utc.getUTCMonth() + 1,
+        day: utc.getUTCDate(),
+    };
+}
+
+function parseDateBoundary(
+    raw: string,
+    boundary: "from" | "to",
+    timeZone: string,
+): { date: Date; isExclusiveUpperBound: boolean } {
+    if (DATE_ONLY_PATTERN.test(raw)) {
+        const [yearRaw, monthRaw, dayRaw] = raw.split("-");
+        const year = Number(yearRaw);
+        const month = Number(monthRaw);
+        const day = Number(dayRaw);
+
+        if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) {
+            throw new HttpError(400, `Invalid ${boundary} date`);
+        }
+
+        if (boundary === "to") {
+            const next = nextDayYmd(year, month, day);
+            return {
+                date: zonedDateTimeToUtc(
+                    { year: next.year, month: next.month, day: next.day, hour: 0, minute: 0, second: 0 },
+                    timeZone,
+                ),
+                isExclusiveUpperBound: true,
+            };
+        }
+
+        return {
+            date: zonedDateTimeToUtc(
+                { year, month, day, hour: 0, minute: 0, second: 0 },
+                timeZone,
+            ),
+            isExclusiveUpperBound: false,
+        };
+    }
+
+    const date = new Date(raw);
+    if (Number.isNaN(date.getTime())) {
+        throw new HttpError(400, `Invalid ${boundary} date`);
+    }
+
+    return { date, isExclusiveUpperBound: false };
+}
+
+function toDateTimeFilter(from: string | undefined, to: string | undefined, timeZone: string): Prisma.DateTimeFilter | undefined {
     const filter: Prisma.DateTimeFilter = {};
-    if (from) filter.gte = from;
-    if (to) filter.lte = to;
+    let fromDate: Date | undefined;
+    let toDate: Date | undefined;
+    let toIsExclusive = false;
+
+    if (from) {
+        const parsedFrom = parseDateBoundary(from, "from", timeZone);
+        fromDate = parsedFrom.date;
+        filter.gte = parsedFrom.date;
+    }
+
+    if (to) {
+        const parsedTo = parseDateBoundary(to, "to", timeZone);
+        toDate = parsedTo.date;
+        toIsExclusive = parsedTo.isExclusiveUpperBound;
+
+        if (toIsExclusive) filter.lt = parsedTo.date;
+        else filter.lte = parsedTo.date;
+    }
+
+    if (fromDate && toDate && fromDate.getTime() > toDate.getTime()) {
+        throw new HttpError(400, "from must be on or before to");
+    }
+
     return Object.keys(filter).length > 0 ? filter : undefined;
 }
 
@@ -196,13 +373,14 @@ function extractSummaryPreview(ai: Prisma.JsonValue) {
 }
 
 function compareHistoryItemsDesc(a: InsightHistoryItem, b: InsightHistoryItem) {
-    const dateDiff = new Date(b.meta.createdAt).getTime() - new Date(a.meta.createdAt).getTime();
+    const dateDiff = new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
     if (dateDiff !== 0) return dateDiff;
 
     const rankDiff = insightTypeRank[b.type] - insightTypeRank[a.type];
     if (rankDiff !== 0) return rankDiff;
 
-    return b.meta.insightId.localeCompare(a.meta.insightId);
+    if (b.id === a.id) return 0;
+    return b.id > a.id ? 1 : -1;
 }
 
 function mapPoseInsightRow(row: {
@@ -224,6 +402,8 @@ function mapPoseInsightRow(row: {
     llmInput: Prisma.JsonValue | null;
 }, includeDebug: boolean): InsightHistoryItem {
     return {
+        id: row.id,
+        createdAt: row.createdAt.toISOString(),
         type: "pose",
         pose: row.pose,
         timeframe: {
@@ -266,6 +446,8 @@ function mapWeeklyInsightRow(row: {
     const previousWeekStart = addDays(row.weekStart, -7);
 
     return {
+        id: row.id,
+        createdAt: row.createdAt.toISOString(),
         type: "weekly",
         window: {
             currentWeek: {
@@ -303,7 +485,8 @@ function mapWeeklyInsightRow(row: {
 
 export async function getInsightsHistoryResponse(userId: string, query: InsightsHistoryQuery) {
     const cursor = decodeCursor(query.cursor);
-    const createdAtFilter = toDateTimeFilter(query.from, query.to);
+    assertValidTimeZone(query.timeZone);
+    const createdAtFilter = toDateTimeFilter(query.from, query.to, query.timeZone);
     const take = query.limit + 1;
 
     const shouldFetchPose = query.type !== "weekly";
@@ -394,9 +577,9 @@ export async function getInsightsHistoryResponse(userId: string, query: Insights
     const lastItem = data[data.length - 1];
     const nextCursor = hasMore && lastItem
         ? encodeCursor({
-            createdAt: lastItem.meta.createdAt,
+            createdAt: lastItem.createdAt,
             type: lastItem.type,
-            id: lastItem.meta.insightId,
+            id: lastItem.id,
         })
         : null;
 
@@ -410,8 +593,9 @@ export async function getInsightsHistoryResponse(userId: string, query: Insights
         filters: {
             type: query.type ?? null,
             poseId: query.poseId ?? null,
-            from: query.from?.toISOString() ?? null,
-            to: query.to?.toISOString() ?? null,
+            from: query.from ?? null,
+            to: query.to ?? null,
+            timeZone: query.timeZone,
             includeDebug: query.includeDebug,
         },
     };
