@@ -19,9 +19,18 @@ const deleteAccountSchema = z.object({
     password: z.string().min(1, "Password is required"),
 });
 
+type PublicUser = Pick<User, "id" | "email" | "name">;
+
+function toPublicUser(user: Pick<User, "id" | "email" | "name">): PublicUser {
+    return {
+        id: user.id,
+        email: user.email,
+        name: user.name ?? null,
+    };
+}
+
 export const signup = async (req: Request, res: Response): Promise<void> => {
     const { name, email, password } = req.body;
-    console.log(name, email, password);
     if (!name || !email || !password) {
         res.status(400).json({ error: 'Please include email, password and name' });
         return;
@@ -49,15 +58,20 @@ export const signup = async (req: Request, res: Response): Promise<void> => {
                 name: name,
                 email: email,
                 password: hashedPassword
-            }
+            },
+            select: {
+                id: true,
+                email: true,
+                name: true,
+            },
         }
     )
 
-    res.status(201).json({ newUser })
+    res.status(201).json({ user: toPublicUser(newUser) })
 }
 
 export const loginUser = (req: Request, res: Response, next: NextFunction): void => {
-    passport.authenticate('local', { session: false }, (err: Error, user: User, info: IVerifyOptions) => {
+    passport.authenticate('local', { session: false }, (err: Error | null, user: User | false, info: IVerifyOptions) => {
         if (err) {
             return next(err)
         }
@@ -69,7 +83,7 @@ export const loginUser = (req: Request, res: Response, next: NextFunction): void
         const secret = process.env.JWT_SECRET as string
         const token = jwt.sign(payload, secret, { expiresIn: '1h' })
 
-        res.json({ user, token })
+        res.json({ user: toPublicUser(user), token })
     }
     )(req, res, next)
 }
@@ -136,17 +150,3 @@ export const deleteAccount = async (req: Request, res: Response) => {
     // 200 is convenient for client flows (show message, then redirect)
     return res.status(200).json({ ok: true, message: "Account deleted" });
 };
-
-
-// Helper for me can delete later
-export const getAllUsers = async (req: Request, res: Response) => {
-    const allUsers = await prisma.user.findMany(
-
-    )
-
-    if (allUsers.length === 0) {
-        return res.status(404).json({ message: "No users found." });
-    }
-
-    res.json(allUsers);
-}
