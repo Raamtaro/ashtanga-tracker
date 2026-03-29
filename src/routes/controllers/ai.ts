@@ -8,6 +8,7 @@ import {
 import { getSessionAiInsightResponse } from "../../services/ai/sessionInsight.js";
 import { getWeeklyInsightsResponse } from "../../services/ai/weeklyInsight.js";
 import { getPoseInsightsResponse } from "../../services/ai/poseInsight.js";
+import { getAiQuotaResponse } from "../../services/ai/quota.js";
 
 function resolveError(err: unknown) {
     if (err instanceof HttpError) {
@@ -78,6 +79,20 @@ export const getPoseInsights = async (req: Request, res: Response) => {
         return res.json(response);
     } catch (err) {
         console.error("getPoseInsights error", err);
+        const resolved = resolveError(err);
+        return res.status(resolved.status).json(resolved.body);
+    }
+};
+
+export const getAiQuota = async (req: Request, res: Response) => {
+    const client = req.user as { id: string } | undefined;
+    if (!client?.id) return res.status(401).json({ error: "Unauthorized" });
+
+    try {
+        const response = await getAiQuotaResponse(client.id);
+        return res.json(response);
+    } catch (err) {
+        console.error("getAiQuota error", err);
         const resolved = resolveError(err);
         return res.status(resolved.status).json(resolved.body);
     }
