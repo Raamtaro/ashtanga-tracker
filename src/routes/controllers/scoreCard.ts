@@ -109,16 +109,16 @@ export const updateScoreCard = async (req: Request, res: Response) => {
             },
         });
 
-        const agg = await tx.scoreCard.aggregate({
-            where: { sessionId: existing.sessionId, skipped: false, overallScore: { not: null } },
-            _avg: { overallScore: true },
-        });
+        // const agg = await tx.scoreCard.aggregate({
+        //     where: { sessionId: existing.sessionId, skipped: false, overallScore: { not: null } },
+        //     _avg: { overallScore: true },
+        // });
 
-        await tx.practiceSession.update({
-            where: { id: existing.sessionId },
-            data: { overallScore: agg._avg.overallScore ?? null },
-            select: { id: true }, // small payload
-        });
+        // await tx.practiceSession.update({
+        //     where: { id: existing.sessionId },
+        //     data: { overallScore: agg._avg.overallScore ?? null },
+        //     select: { id: true }, // small payload
+        // });
 
         return updated;
     })

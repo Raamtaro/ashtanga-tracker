@@ -149,7 +149,7 @@ model ScoreCard {
   segment        SequenceSegment? // which chunk of the practice
   side           Side? // helpful for asymmetrical poses
   skipped        Boolean          @default(false) // did user skip this pose?
-  scored         Boolean          @default(false) // does the user want to fill out a scoreCard for this pose? (better UX, ensures that the user doesn't have to fill out 100s of scoreCards if they don't want to – they can just fill out the ones they care about)
+  scored         Boolean          @default(false) // does the user want to fill out a scoreCard for this pose? (better UX, ensures that the user doesn't have to fill out ~100 scoreCards if they don't want to – they can just fill out the ones they care about)
 
   // Ratings – all optional so you can evolve this
   ease      Int? // 1–10

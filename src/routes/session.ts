@@ -1,6 +1,7 @@
 import Router from "express";
 // import { createPresetSession, createCustomSession,  } from "./controllers/session/create";
 import { createPresetSession as createPresetV2, createCustomSession as createCustomV2 } from "./controllers/session/createV2.js";
+import { createPresetSession as createPresetV3, createCustomSession as createCustomV3 } from "./controllers/session/createV3.js";
 import { publishSession, getSessionById, getAllSessions, deleteSession, getSessionStats } from "./controllers/session/basic.js";
 import passport from "passport";
 
@@ -11,6 +12,8 @@ router.get('/:id/stats', passport.authenticate('jwt',{session: false}), getSessi
 router.get('/', passport.authenticate('jwt',{session: false}), getAllSessions); //Get all sessions
 router.post('/preset', passport.authenticate('jwt',{session: false}), createPresetV2);
 router.post('/custom', passport.authenticate('jwt',{session: false}), createCustomV2);
+router.post('/presetV3', passport.authenticate('jwt',{session: false}), createPresetV3);
+router.post('/customV3', passport.authenticate('jwt',{session: false}), createCustomV3);
 router.put('/:id/publish', passport.authenticate('jwt',{session: false}), publishSession);
 router.delete('/:id', passport.authenticate('jwt',{session: false}), deleteSession);
 
