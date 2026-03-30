@@ -128,6 +128,9 @@ const presetBodySchema = z.object(
         date: z.coerce.date().optional(), // if not provided, will default to current date
         label: z.string().optional(),
         duration: z.number().min(1).optional(),
+        overallScore: z.number().min(1).max(10).optional(),
+        energyLevel: z.number().min(1).max(10).optional(),
+        mood: z.number().min(1).max(10).optional(),
         notes: z.string().optional(),
         practiceType: z.enum(PracticeType),
         scoredPoses: z.array(z.string()).optional() //If not provided, will default to all poses in the plan being unscored
@@ -139,6 +142,9 @@ const customBodySchema = z.object(
         date: z.coerce.date().optional(), // if not provided, will default to current date
         label: z.string().optional(), // will add some logic for this to default to the combination of segments - i.e. Primary + Partial (Intermediate | Advanced (A | B) )
         duration: z.number().min(1).optional(),
+        overallScore: z.number().min(1).max(10).optional(),
+        energyLevel: z.number().min(1).max(10).optional(),
+        mood: z.number().min(1).max(10).optional(),
         notes: z.string().optional(),
         practiceType: z.literal(PracticeType.CUSTOM),
         sequenceSnippets: z.array(
@@ -241,6 +247,9 @@ async function buildSessionWithScoreCards(
         userId: string;
         date?: Date;
         label?: string;
+        overallScore?: number;
+        energyLevel?: number;
+        mood?: number;
         notes?: string;
         duration?: number;
         practiceType: PracticeType;
@@ -248,7 +257,7 @@ async function buildSessionWithScoreCards(
         scoredPoses: string[] | undefined; //if undefined, will default to all poses in the plan being unscored
     }
 ) {
-    const { tx, userId, date, label, notes, practiceType, items, duration, scoredPoses } = params;
+    const { tx, userId, date, label, notes, practiceType, items, duration, scoredPoses, overallScore, energyLevel, mood } = params;
 
     const session = await tx.practiceSession.create(
         {
@@ -256,6 +265,9 @@ async function buildSessionWithScoreCards(
                 userId,
                 date: date || new Date(),
                 label: label || `${practiceType} Practice - ${new Date().toLocaleDateString()}`,
+                overallScore: overallScore || null,
+                energyLevel: energyLevel || null,
+                mood: mood || null,
                 notes: notes || null,
                 practiceType,
                 durationMinutes: duration || null,
@@ -270,7 +282,7 @@ async function buildSessionWithScoreCards(
 
     let order = 1;
     const data: Prisma.ScoreCardCreateManyInput[] = [];
-    for (const it of params.items) { 
+    for (const it of params.items) {
         const pose = poseMap.get(it.slug)!;
         const isScored = scoredPoseSet ? scoredPoseSet.has(pose.slug) : false;
         if (pose.isTwoSided) {
@@ -291,6 +303,10 @@ async function buildSessionWithScoreCards(
             id: true,
             date: true,
             label: true,
+            overallScore: true,
+            energyLevel: true,
+            mood: true,
+            notes: true,
             practiceType: true,
             durationMinutes: true,
             scoreCards: {
@@ -346,6 +362,9 @@ export const createPresetSession = async (req: Request, res: Response) => {
                     date: body.date,
                     label: body.label,
                     notes: body.notes,
+                    overallScore: body.overallScore,
+                    energyLevel: body.energyLevel,
+                    mood: body.mood,
                     practiceType: body.practiceType,
                     items: planItems,
                     duration: body.duration,
@@ -395,6 +414,9 @@ export const createCustomSession = async (req: Request, res: Response) => {
                     userId: client.id,
                     date: body.date,
                     label: body.label,
+                    overallScore: body.overallScore,
+                    energyLevel: body.energyLevel,
+                    mood: body.mood,
                     notes: body.notes,
                     practiceType: body.practiceType,
                     items: planItems,
