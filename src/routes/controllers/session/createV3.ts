@@ -245,9 +245,10 @@ async function buildSessionWithScoreCards(
         duration?: number;
         practiceType: PracticeType;
         items: PlanItem[];
+        scoredPoses: string[] | undefined; //if undefined, will default to all poses in the plan being unscored
     }
 ) {
-    const { tx, userId, date, label, notes, practiceType, items, duration } = params;
+    const { tx, userId, date, label, notes, practiceType, items, duration, scoredPoses } = params;
 
     const session = await tx.practiceSession.create(
         {
@@ -265,18 +266,20 @@ async function buildSessionWithScoreCards(
 
     const uniqueSlugs = Array.from(new Set(items.map(i => i.slug)));
     const poseMap = await fetchPosesBySlug(tx, uniqueSlugs);
+    const scoredPoseSet = scoredPoses !== undefined ? new Set(scoredPoses) : undefined;
 
     let order = 1;
     const data: Prisma.ScoreCardCreateManyInput[] = [];
-    for (const it of params.items) {
+    for (const it of params.items) { 
         const pose = poseMap.get(it.slug)!;
+        const isScored = scoredPoseSet ? scoredPoseSet.has(pose.slug) : false;
         if (pose.isTwoSided) {
             data.push(
-                { sessionId: session.id, poseId: pose.id, orderInSession: order++, segment: it.segment, side: 'RIGHT', skipped: false },
-                { sessionId: session.id, poseId: pose.id, orderInSession: order++, segment: it.segment, side: 'LEFT', skipped: false },
+                { sessionId: session.id, poseId: pose.id, orderInSession: order++, segment: it.segment, side: 'RIGHT', skipped: false, scored: isScored },
+                { sessionId: session.id, poseId: pose.id, orderInSession: order++, segment: it.segment, side: 'LEFT', skipped: false, scored: isScored },
             );
         } else {
-            data.push({ sessionId: session.id, poseId: pose.id, orderInSession: order++, segment: it.segment, side: 'NA', skipped: false });
+            data.push({ sessionId: session.id, poseId: pose.id, orderInSession: order++, segment: it.segment, side: 'NA', skipped: false, scored: isScored });
         }
     }
 
@@ -300,7 +303,8 @@ async function buildSessionWithScoreCards(
                             slug: true,
                             sequenceGroup: true
                         }
-                    }
+                    },
+                    scored: true
                 },
             }
         },
@@ -344,7 +348,8 @@ export const createPresetSession = async (req: Request, res: Response) => {
                     notes: body.notes,
                     practiceType: body.practiceType,
                     items: planItems,
-                    duration: body.duration
+                    duration: body.duration,
+                    scoredPoses: body.scoredPoses
                 }
             )
         }
@@ -393,7 +398,8 @@ export const createCustomSession = async (req: Request, res: Response) => {
                     notes: body.notes,
                     practiceType: body.practiceType,
                     items: planItems,
-                    duration: body.duration
+                    duration: body.duration,
+                    scoredPoses: body.scoredPoses
                 }
             )
         }
