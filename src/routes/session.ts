@@ -11,7 +11,7 @@ router.get('/:id', passport.authenticate('jwt',{session: false}), getSessionById
 router.get('/:id/stats', passport.authenticate('jwt',{session: false}), getSessionStats);
 router.get('/', passport.authenticate('jwt',{session: false}), getAllSessions); //Get all sessions
 router.post('/preset', passport.authenticate('jwt',{session: false}), createPresetV2);
-router.post('/custom', passport.authenticate('jwt',{session: false}), createCustomV2);
+router.post('/custom', passport.authenticate('jwt',{session: false}), createCustomV2); 
 router.post('/presetV3', passport.authenticate('jwt',{session: false}), createPresetV3);
 router.post('/customV3', passport.authenticate('jwt',{session: false}), createCustomV3);
 router.put('/:id/publish', passport.authenticate('jwt',{session: false}), publishSession);

@@ -67,6 +67,37 @@ export const getAllPoses = async (req: Request, res: Response) => {
     res.json(allPoses);
 }
 
+export const getScoredPoses = async (req: Request, res: Response) => {
+    const client = req.user as { id: string } | undefined;
+    if (!client?.id) return res.status(401).json({ message: "Unauthorized" });
+
+    const scoredPoses = await prisma.pose.findMany({
+        where: {
+            scoreCards: {
+                some: {
+                    scored: true,
+                    session: {
+                        userId: client.id,
+                        // status: 'PUBLISHED',
+                    },
+                },
+            },
+        },
+        select: {
+            id: true,
+            sanskritName: true,
+            // englishName: true,
+            slug: true,
+        },
+    });
+
+    if (scoredPoses.length === 0) {
+        return res.status(404).json({ message: "No scored poses found." });
+    }
+
+    res.json(scoredPoses);
+}
+
 export async function listPosesBySegment(req: Request, res: Response) {
     try {
         const q = posesQuerySchema.parse(req.query);
