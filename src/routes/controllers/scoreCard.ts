@@ -50,80 +50,93 @@ export const updateScoreCard = async (req: Request, res: Response) => {
     if (!card || card.session.userId !== client.id) return res.status(404).json({ error: 'Not found' });
     if (card.session.status === 'PUBLISHED') return res.status(409).json({ error: 'Session is published. Unpublish to edit.' });
 
-    const result = await prisma.$transaction(async (tx) => {
-        const existing = await tx.scoreCard.findFirst(
-            {
-                where: {
-                    id,
-                    session: {
-                        userId: client.id
+    try {
+        const result = await prisma.$transaction(async (tx) => {
+            const existing = await tx.scoreCard.findFirst(
+                {
+                    where: {
+                        id,
+                        session: {
+                            userId: client.id
+                        }
+                    },
+                    select: {
+                        id: true,
+                        sessionId: true,
+                        scored: true,
+                        skipped: true,
+                        side: true,
+                        notes: true,
+                        ease: true,
+                        comfort: true,
+                        stability: true,
+                        pain: true,
+                        breath: true,
+                        focus: true,
                     }
-                },
-                select: {
-                    id: true,
-                    sessionId: true,
-                    skipped: true,
-                    side: true,
-                    notes: true,
-                    ease: true,
-                    comfort: true,
-                    stability: true,
-                    pain: true,
-                    breath: true,
-                    focus: true,
                 }
+            )
+
+            if (!existing) {
+                // ensure rollback inside tx by throwing
+                throw Object.assign(new Error('ScoreCard not found'), { status: 404 });
             }
-        )
 
-        if (!existing) {
-            // ensure rollback inside tx by throwing
-            throw Object.assign(new Error('ScoreCard not found'), { status: 404 });
+            if (payload.skipped === true && existing.scored) {
+                throw Object.assign(new Error('Cannot set skipped=true for a scored scoreCard.'), { status: 409 });
+            }
+
+            const willSkip = payload.skipped ?? existing.skipped;
+
+            const mergedMetrics: Partial<Record<MetricKey, number | null>> = {};
+            for (const k of METRIC_KEYS) {
+                const incoming = payload[k];
+                const current = existing[k];
+                mergedMetrics[k] = willSkip ? null : (incoming !== undefined ? incoming : current);
+            }
+
+            const overallScore = willSkip ? null : computeOverall(mergedMetrics);
+
+            const data: Prisma.ScoreCardUpdateInput = {
+                ...('notes' in payload ? { notes: payload.notes ?? null } : {}),
+                ...('side' in payload ? { side: payload.side ?? null } : {}),
+                ...('skipped' in payload ? { skipped: willSkip } : {}),
+                ...mergedMetrics,
+                overallScore,
+            };
+
+            const updated = await tx.scoreCard.update({
+                where: { id: existing.id },
+                data,
+                select: {
+                    id: true, sessionId: true, segment: true, side: true, scored: true, skipped: true, notes: true,
+                    ease: true, comfort: true, stability: true, pain: true, breath: true, focus: true,
+                    overallScore: true,
+                },
+            });
+
+            // const agg = await tx.scoreCard.aggregate({
+            //     where: { sessionId: existing.sessionId, skipped: false, overallScore: { not: null } },
+            //     _avg: { overallScore: true },
+            // });
+
+            // await tx.practiceSession.update({
+            //     where: { id: existing.sessionId },
+            //     data: { overallScore: agg._avg.overallScore ?? null },
+            //     select: { id: true }, // small payload
+            // });
+
+            return updated;
+        })
+
+        return res.json({ scoreCard: result });
+    } catch (err: any) {
+        const status = typeof err?.status === "number" ? err.status : 500;
+        if (status === 500) {
+            console.error("updateScoreCard error", err);
         }
-
-        const willSkip = payload.skipped ?? existing.skipped;
-
-        const mergedMetrics: Partial<Record<MetricKey, number | null>> = {};
-        for (const k of METRIC_KEYS) {
-            const incoming = payload[k];
-            const current = existing[k];
-            mergedMetrics[k] = willSkip ? null : (incoming !== undefined ? incoming : current);
-        }
-
-        const overallScore = willSkip ? null : computeOverall(mergedMetrics);
-
-        const data: Prisma.ScoreCardUpdateInput = {
-            ...('notes' in payload ? { notes: payload.notes ?? null } : {}),
-            ...('side' in payload ? { side: payload.side ?? null } : {}),
-            ...('skipped' in payload ? { skipped: willSkip } : {}),
-            ...mergedMetrics,
-            overallScore,
-        };
-
-        const updated = await tx.scoreCard.update({
-            where: { id: existing.id },
-            data,
-            select: {
-                id: true, sessionId: true, segment: true, side: true, skipped: true, notes: true,
-                ease: true, comfort: true, stability: true, pain: true, breath: true, focus: true,
-                overallScore: true,
-            },
-        });
-
-        // const agg = await tx.scoreCard.aggregate({
-        //     where: { sessionId: existing.sessionId, skipped: false, overallScore: { not: null } },
-        //     _avg: { overallScore: true },
-        // });
-
-        // await tx.practiceSession.update({
-        //     where: { id: existing.sessionId },
-        //     data: { overallScore: agg._avg.overallScore ?? null },
-        //     select: { id: true }, // small payload
-        // });
-
-        return updated;
-    })
-
-    res.json({ scoreCard: result });
+        return res.status(status).json({ error: err?.message ?? "Internal server error" });
+    }
 
 }
 
@@ -148,7 +161,7 @@ export const getScoreCardById = async (req: Request, res: Response) => {
             },
             select: {
 
-                id: true, sessionId: true, segment: true, side: true, skipped: true, notes: true,
+                id: true, sessionId: true, segment: true, side: true, scored: true, skipped: true, notes: true,
                 ease: true, comfort: true, stability: true, pain: true, breath: true, focus: true,
                 overallScore: true,
                 pose: {

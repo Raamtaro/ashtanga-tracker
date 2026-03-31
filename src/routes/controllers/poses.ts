@@ -76,6 +76,7 @@ export const getScoredPoses = async (req: Request, res: Response) => {
             scoreCards: {
                 some: {
                     scored: true,
+                    skipped: false,
                     session: {
                         userId: client.id,
                         // status: 'PUBLISHED',
@@ -179,10 +180,10 @@ export const trendPoseMetrics = async (req: Request, res: Response) => {
                 : undefined;
         const where: Prisma.ScoreCardWhereInput = {
             poseId: id,
+            scored: true,
             session: {
                 userId: client.id,
                 ...(sessionDate ? { date: sessionDate } : {}),
-                // optional but you said you want published-only trends:
                 status: 'PUBLISHED',
             },
             ...(q.includeSkipped ? {} : { skipped: false }),

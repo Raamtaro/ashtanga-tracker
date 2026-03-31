@@ -62,6 +62,7 @@ export const getSessionById = async (req: Request, res: Response) => {
                 select: {
                     id: true,
                     side: true,
+                    scored: true,
                     skipped: true,
                     overallScore: true,
                     ease: true,
@@ -81,14 +82,14 @@ export const getSessionById = async (req: Request, res: Response) => {
     if (!session) return res.status(404).json({ error: "Session not found" });
 
     const scoreCards = session.scoreCards.map((c) => {
-        const missingAny =
-            !c.skipped && REQUIRED_METRICS.some((k) => c[k] == null);
-
-        const isComplete = c.skipped ? true : !missingAny;
+        const requiresMetrics = c.scored && !c.skipped;
+        const missingAny = requiresMetrics && REQUIRED_METRICS.some((k) => c[k] == null);
+        const isComplete = !missingAny;
 
         return {
             id: c.id,
             side: c.side,
+            scored: c.scored,
             skipped: c.skipped,
             overallScore: c.overallScore,
             isComplete,
@@ -123,6 +124,7 @@ type StatsCardRow = {
     orderInSession: number;
     segment: string | null;
     side: string | null;
+    scored: boolean;
     skipped: boolean;
     overallScore: number | null;
     ease: number | null;
@@ -183,6 +185,7 @@ export async function getSessionStats(req: Request, res: Response) {
                     orderInSession: true,
                     segment: true,
                     side: true,
+                    scored: true,
                     skipped: true,
                     overallScore: true,
                     ease: true,
@@ -211,6 +214,7 @@ export async function getSessionStats(req: Request, res: Response) {
         orderInSession: card.orderInSession,
         segment: card.segment,
         side: card.side,
+        scored: card.scored,
         skipped: card.skipped,
         overallScore: card.overallScore,
         ease: card.ease,
@@ -222,13 +226,14 @@ export async function getSessionStats(req: Request, res: Response) {
         pose: card.pose,
     }));
 
-    const activeCards = scoreCards.filter((card) => !card.skipped);
+    const scoredCards = scoreCards.filter((card) => card.scored);
+    const activeCards = scoredCards.filter((card) => !card.skipped);
 
-    const completeCount = scoreCards.filter((card) =>
+    const completeCount = scoredCards.filter((card) =>
         card.skipped || REQUIRED_METRICS.every((metric) => card[metric] != null),
     ).length;
 
-    const incompleteCount = scoreCards.length - completeCount;
+    const incompleteCount = scoredCards.length - completeCount;
 
     const bySegment = buildGroupedStats(
         activeCards,
@@ -254,6 +259,8 @@ export async function getSessionStats(req: Request, res: Response) {
         };
         summary: {
             totalScoreCards: number;
+            scoredScoreCards: number;
+            unscoredScoreCards: number;
             activeScoreCards: number;
             skippedScoreCards: number;
             completeScoreCards: number;
@@ -277,8 +284,10 @@ export async function getSessionStats(req: Request, res: Response) {
         },
         summary: {
             totalScoreCards: scoreCards.length,
+            scoredScoreCards: scoredCards.length,
+            unscoredScoreCards: scoreCards.length - scoredCards.length,
             activeScoreCards: activeCards.length,
-            skippedScoreCards: scoreCards.length - activeCards.length,
+            skippedScoreCards: scoredCards.filter((card) => card.skipped).length,
             completeScoreCards: completeCount,
             incompleteScoreCards: incompleteCount,
         },
@@ -370,10 +379,11 @@ export const publishSession = async (req: Request, res: Response) => {
             }
 
             // Otherwise, publishing from DRAFT -> PUBLISHED
-            // 1) Validate completeness: any required metric null on any unskipped card?
+            // 1) Validate completeness: any required metric null on any scored + unskipped card?
             const incomplete = await tx.scoreCard.findFirst({
                 where: {
                     sessionId: session.id,
+                    scored: true,
                     skipped: false,
                     OR: REQUIRED_METRICS.map((k) => ({ [k]: null })),
                 },
@@ -395,7 +405,7 @@ export const publishSession = async (req: Request, res: Response) => {
                 return {
                     kind: "incomplete" as const,
                     error: {
-                        message: "Cannot publish: some scorecards are incomplete.",
+                        message: "Cannot publish: some scored scorecards are incomplete.",
                         scoreCardId: incomplete.id,
                         pose: incomplete.pose,
                         side: incomplete.side,
@@ -404,9 +414,9 @@ export const publishSession = async (req: Request, res: Response) => {
                 };
             }
 
-            // 2) Recompute overallScore for all unskipped cards (safe + idempotent)
+            // 2) Recompute overallScore for all scored + unskipped cards (safe + idempotent)
             const cards = await tx.scoreCard.findMany({
-                where: { sessionId: session.id, skipped: false },
+                where: { sessionId: session.id, scored: true, skipped: false },
                 select: {
                     id: true,
                     ease: true,
@@ -429,7 +439,7 @@ export const publishSession = async (req: Request, res: Response) => {
 
             // 3) Compute + store session overallScore
             const agg = await tx.scoreCard.aggregate({
-                where: { sessionId: session.id, skipped: false, overallScore: { not: null } },
+                where: { sessionId: session.id, scored: true, skipped: false, overallScore: { not: null } },
                 _avg: { overallScore: true },
             });
 
