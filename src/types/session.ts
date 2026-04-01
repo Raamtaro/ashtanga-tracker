@@ -52,7 +52,6 @@ export type GetSessionByIdResponse = {
     date: string; // ISO
     overallScore: number | null;
     summary: SessionViewerSummary;
-    scoreCards: SessionViewerCard[]; // alias to practicedCards
     practicedCards: SessionViewerCard[];
     scoredCards: SessionViewerCard[];
   };

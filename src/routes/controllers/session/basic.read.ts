@@ -82,7 +82,6 @@ export const getSessionById = async (req: Request, res: Response) => {
             date: session.date.toISOString(),
             overallScore: session.overallScore,
             summary,
-            scoreCards: practicedCards,
             practicedCards,
             scoredCards,
         },
