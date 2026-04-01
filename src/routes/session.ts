@@ -2,7 +2,7 @@ import Router from "express";
 // import { createPresetSession, createCustomSession,  } from "./controllers/session/create";
 import { createPresetSession as createPresetV2, createCustomSession as createCustomV2 } from "./controllers/session/createV2.js";
 import { createPresetSession as createPresetV3, createCustomSession as createCustomV3 } from "./controllers/session/createV3.js";
-import { publishSession, getSessionById, getAllSessions, deleteSession, getSessionStats } from "./controllers/session/basic.js";
+import { publishSession, getSessionById, getAllSessions, deleteSession, getSessionStats, updateSessionById } from "./controllers/session/basic.js";
 import passport from "passport";
 
 const router = Router();
@@ -14,6 +14,7 @@ router.post('/preset', passport.authenticate('jwt',{session: false}), createPres
 router.post('/custom', passport.authenticate('jwt',{session: false}), createCustomV2); 
 router.post('/presetV3', passport.authenticate('jwt',{session: false}), createPresetV3);
 router.post('/customV3', passport.authenticate('jwt',{session: false}), createCustomV3);
+router.patch('/:id', passport.authenticate('jwt',{session: false}), updateSessionById);
 router.put('/:id/publish', passport.authenticate('jwt',{session: false}), publishSession);
 router.delete('/:id', passport.authenticate('jwt',{session: false}), deleteSession);
 

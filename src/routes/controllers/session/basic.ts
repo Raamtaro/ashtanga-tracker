@@ -5,6 +5,7 @@ import { z } from "zod";
 import { SequenceGroup } from "@prisma/client";
 import { METRIC_KEYS, type MetricKey } from "../../../lib/constants.js";
 import { metricStatsMap, summarizeNumericStats } from "../../../lib/insights/helpers.js";
+import type { GetSessionByIdResponse, SessionViewerCard } from "../../../types/session.js";
 
 const REQUIRED_METRICS = METRIC_KEYS;
 
@@ -27,6 +28,15 @@ const qSchema = z.object({
     limit: z.coerce.number().int().positive().max(100).default(20),
     cursor: z.string().optional(), // base64url token
 });
+
+const updateSessionBodySchema = z.object({
+    label: z.string().trim().min(1).max(255).nullable().optional(),
+    durationMinutes: z.union([z.coerce.number().int().min(1), z.null()]).optional(),
+    overallScore: z.union([z.coerce.number().min(1).max(10), z.null()]).optional(),
+    energyLevel: z.union([z.coerce.number().int().min(1).max(10), z.null()]).optional(),
+    mood: z.union([z.coerce.number().int().min(1).max(10), z.null()]).optional(),
+    notes: z.string().max(2000).nullable().optional(),
+}).refine(obj => Object.keys(obj).length > 0, { message: "No fields to update" });
 
 type CursorPayload = { d: string; id: string }; // d = ISO date string of last item
 
@@ -55,12 +65,18 @@ export const getSessionById = async (req: Request, res: Response) => {
             status: true,
             date: true,
             label: true,
+            practiceType: true,
+            durationMinutes: true,
+            mood: true,
+            energyLevel: true,
             notes: true,
             overallScore: true,
             scoreCards: {
                 orderBy: { orderInSession: 'asc' },
                 select: {
                     id: true,
+                    orderInSession: true,
+                    segment: true,
                     side: true,
                     scored: true,
                     skipped: true,
@@ -72,7 +88,14 @@ export const getSessionById = async (req: Request, res: Response) => {
                     breath: true,
                     focus: true,
                     pose: {
-                        select: { sanskritName: true, sequenceGroup: true },
+                        select: {
+                            id: true,
+                            slug: true,
+                            sanskritName: true,
+                            englishName: true,
+                            sequenceGroup: true,
+                            isTwoSided: true,
+                        },
                     },
                 },
             },
@@ -81,42 +104,135 @@ export const getSessionById = async (req: Request, res: Response) => {
 
     if (!session) return res.status(404).json({ error: "Session not found" });
 
-    const scoreCards = session.scoreCards.map((c) => {
+    const practicedCards: SessionViewerCard[] = session.scoreCards.map((c) => {
         const requiresMetrics = c.scored && !c.skipped;
         const missingAny = requiresMetrics && REQUIRED_METRICS.some((k) => c[k] == null);
         const isComplete = !missingAny;
 
         return {
             id: c.id,
+            orderInSession: c.orderInSession,
+            segment: c.segment,
             side: c.side,
             scored: c.scored,
             skipped: c.skipped,
             overallScore: c.overallScore,
             isComplete,
+            canToggleSkipped: !c.scored && session.status === "DRAFT",
+            canEditScore: c.scored && session.status === "DRAFT",
             pose: c.pose,
         };
     });
 
-    const firstIncomplete = scoreCards.find((c) => !c.isComplete)?.id ?? null;
+    const scoredCards = practicedCards.filter((c) => c.scored);
+    const firstIncomplete = scoredCards.find((c) => !c.isComplete)?.id ?? null;
+    const completeScoredCount = scoredCards.filter((c) => c.isComplete).length;
+    const incompleteScoredCount = scoredCards.length - completeScoredCount;
+    const completeLegacyCount = practicedCards.filter((c) => c.isComplete).length;
+    const incompleteLegacyCount = practicedCards.length - completeLegacyCount;
 
     const summary = {
-        total: scoreCards.length,
-        complete: scoreCards.filter((c) => c.isComplete).length,
-        incomplete: scoreCards.filter((c) => !c.isComplete).length,
+        total: practicedCards.length, // legacy key for existing clients
+        complete: completeLegacyCount, // legacy key for existing clients
+        incomplete: incompleteLegacyCount, // legacy key for existing clients
+        totalScoreCards: practicedCards.length,
+        scoredScoreCards: scoredCards.length,
+        unscoredScoreCards: practicedCards.length - scoredCards.length,
+        activeScoreCards: scoredCards.filter((c) => !c.skipped).length,
+        skippedScoreCards: scoredCards.filter((c) => c.skipped).length,
+        completeScoreCards: completeScoredCount,
+        incompleteScoreCards: incompleteScoredCount,
         firstIncompleteScoreCardId: firstIncomplete,
     };
 
-    return res.json({
+    const responseShape: GetSessionByIdResponse = {
         session: {
             id: session.id,
             status: session.status,
+            label: session.label,
+            practiceType: session.practiceType,
+            durationMinutes: session.durationMinutes,
+            mood: session.mood,
+            energyLevel: session.energyLevel,
             notes: session.notes,
             date: session.date.toISOString(),
             overallScore: session.overallScore,
             summary,
-            scoreCards,
+            scoreCards: practicedCards,
+            practicedCards,
+            scoredCards,
         },
-    });
+    };
+
+    return res.json(responseShape);
+};
+
+export const updateSessionById = async (req: Request, res: Response) => {
+    const client = req.user as { id: string } | undefined;
+    if (!client?.id) return res.status(401).json({ message: "Unauthorized" });
+
+    const { id } = req.params;
+    if (!id) return res.status(400).json({ error: "Missing session id" });
+
+    const parsed = updateSessionBodySchema.safeParse(req.body);
+    if (!parsed.success) {
+        return res.status(422).json({
+            message: "Invalid input",
+            issues: parsed.error.issues.map((i) => ({
+                path: i.path.join("."),
+                message: i.message,
+            })),
+        });
+    }
+    const body = parsed.data;
+
+    try {
+        const session = await prisma.practiceSession.findFirst({
+            where: { id, userId: client.id },
+            select: { id: true, status: true },
+        });
+
+        if (!session) return res.status(404).json({ error: "Session not found or no permission" });
+        if (session.status === "PUBLISHED") {
+            return res.status(409).json({ error: "Session is published. Unpublish to edit." });
+        }
+
+        const data: Prisma.PracticeSessionUpdateInput = {
+            ...("label" in body ? { label: body.label } : {}),
+            ...("durationMinutes" in body ? { durationMinutes: body.durationMinutes } : {}),
+            ...("overallScore" in body ? { overallScore: body.overallScore } : {}),
+            ...("energyLevel" in body ? { energyLevel: body.energyLevel } : {}),
+            ...("mood" in body ? { mood: body.mood } : {}),
+            ...("notes" in body ? { notes: body.notes } : {}),
+        };
+
+        const updated = await prisma.practiceSession.update({
+            where: { id: session.id },
+            data,
+            select: {
+                id: true,
+                status: true,
+                date: true,
+                label: true,
+                practiceType: true,
+                durationMinutes: true,
+                overallScore: true,
+                energyLevel: true,
+                mood: true,
+                notes: true,
+            },
+        });
+
+        return res.json({
+            session: {
+                ...updated,
+                date: updated.date.toISOString(),
+            },
+        });
+    } catch (err) {
+        console.error("updateSessionById error", err);
+        return res.status(500).json({ error: "Internal server error" });
+    }
 };
 
 type StatsCardRow = {
