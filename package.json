@@ -6,6 +6,7 @@
   "type": "module",
   "scripts": {
     "build": "tsc",
+    "test": "npm run build && node --test dist/src/routes/controllers/session/basic.helpers.test.js dist/src/routes/controllers/session/publishSession.service.test.js",
     "start": "node dist/index.js",
     "dev": "tsx --watch index.ts",
     "seedPoses": "tsx ./src/seed/seed.ts",

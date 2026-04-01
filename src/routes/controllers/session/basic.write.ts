@@ -3,6 +3,12 @@ import { Prisma } from "@prisma/client";
 import { Request, Response } from "express";
 import type { UpdateSessionByIdResponse } from "../../../types/session.js";
 import {
+    sendInternalServerError,
+    sendInvalidInput,
+    sendSessionNotFoundOrNoPermission,
+    sendSessionPublishedLocked,
+} from "./basic.errors.js";
+import {
     requireSessionIdParam,
     requireUserId,
     updateSessionBodySchema,
@@ -22,13 +28,7 @@ export const updateSessionById = async (req: Request, res: Response) => {
 
     const parsed = updateSessionBodySchema.safeParse(req.body);
     if (!parsed.success) {
-        return res.status(422).json({
-            message: "Invalid input",
-            issues: parsed.error.issues.map((issue) => ({
-                path: issue.path.join("."),
-                message: issue.message,
-            })),
-        });
+        return sendInvalidInput(res, parsed.error.issues);
     }
     const body = parsed.data;
 
@@ -38,9 +38,9 @@ export const updateSessionById = async (req: Request, res: Response) => {
             select: SESSION_ID_STATUS_SELECT,
         });
 
-        if (!session) return res.status(404).json({ error: "Session not found or no permission" });
+        if (!session) return sendSessionNotFoundOrNoPermission(res);
         if (session.status === "PUBLISHED") {
-            return res.status(409).json({ error: "Session is published. Unpublish to edit." });
+            return sendSessionPublishedLocked(res);
         }
 
         const data: Prisma.PracticeSessionUpdateInput = {
@@ -68,7 +68,7 @@ export const updateSessionById = async (req: Request, res: Response) => {
         return res.json(responseShape);
     } catch (err) {
         console.error("updateSessionById error", err);
-        return res.status(500).json({ error: "Internal server error" });
+        return sendInternalServerError(res);
     }
 };
 
@@ -83,7 +83,7 @@ export const publishSession = async (req: Request, res: Response) => {
         const result = await prisma.$transaction((tx) => runPublishWorkflow(tx, { sessionId, userId }));
 
         if (result.kind === "not_found") {
-            return res.status(404).json({ error: "Session not found or no permission" });
+            return sendSessionNotFoundOrNoPermission(res);
         }
         if (result.kind === "incomplete") {
             return res.status(409).json(result.error);
@@ -97,7 +97,7 @@ export const publishSession = async (req: Request, res: Response) => {
         });
     } catch (err) {
         console.error("publishSession error", err);
-        return res.status(500).json({ error: "Internal server error" });
+        return sendInternalServerError(res);
     }
 };
 
@@ -114,12 +114,12 @@ export async function deleteSession(req: Request, res: Response) {
         });
 
         if (deleted.count === 0) {
-            return res.status(404).json({ error: "Session not found or no permission" });
+            return sendSessionNotFoundOrNoPermission(res);
         }
 
         return res.json({ message: "Session deleted" });
     } catch (err) {
         console.error("deleteSession error", err);
-        return res.status(500).json({ error: "Internal server error" });
+        return sendInternalServerError(res);
     }
 }

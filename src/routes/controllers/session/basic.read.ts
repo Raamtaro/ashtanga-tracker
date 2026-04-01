@@ -7,6 +7,7 @@ import type {
     GetSessionByIdResponse,
     GetSessionStatsResponse,
 } from "../../../types/session.js";
+import { sendSessionNotFound } from "./basic.errors.js";
 import {
     REQUIRED_METRICS,
     buildSessionViewerSummary,
@@ -62,7 +63,7 @@ export const getSessionById = async (req: Request, res: Response) => {
         select: SESSION_VIEW_SELECT,
     });
 
-    if (!session) return res.status(404).json({ error: "Session not found" });
+    if (!session) return sendSessionNotFound(res);
 
     const practicedCards = toSessionViewerCards(session.scoreCards, session.status);
     const scoredCards = practicedCards.filter((card) => card.scored);
@@ -102,7 +103,7 @@ export async function getSessionStats(req: Request, res: Response) {
         select: SESSION_STATS_SELECT,
     });
 
-    if (!session) return res.status(404).json({ error: "Session not found" });
+    if (!session) return sendSessionNotFound(res);
 
     const scoreCards: SessionStatsCardRow[] = session.scoreCards;
     const scoredCards = scoreCards.filter((card) => card.scored);

@@ -3,6 +3,7 @@ import type { Status } from "@prisma/client";
 import { z } from "zod";
 import { METRIC_KEYS, type MetricKey } from "../../../lib/constants.js";
 import type { SessionViewerCard, SessionViewerSummary } from "../../../types/session.js";
+import { sendMissingSessionId, sendUnauthorized } from "./basic.errors.js";
 
 export const REQUIRED_METRICS = METRIC_KEYS;
 
@@ -38,7 +39,7 @@ export function decodeCursor(s: string | undefined): CursorPayload | undefined {
 export function requireUserId(req: Request, res: Response): string | null {
     const client = req.user as { id: string } | undefined;
     if (!client?.id) {
-        res.status(401).json({ message: "Unauthorized" });
+        sendUnauthorized(res);
         return null;
     }
     return client.id;
@@ -47,7 +48,7 @@ export function requireUserId(req: Request, res: Response): string | null {
 export function requireSessionIdParam(req: Request, res: Response): string | null {
     const { id } = req.params;
     if (!id) {
-        res.status(400).json({ error: "Missing session id" });
+        sendMissingSessionId(res);
         return null;
     }
     return id;
