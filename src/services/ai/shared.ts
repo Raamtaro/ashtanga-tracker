@@ -28,6 +28,15 @@ export const POSE_INSIGHT_WEEKLY_LIMIT = 3;
 export const WEEKLY_INSIGHT_WEEKLY_LIMIT = 1;
 export const PAIN_SCORE_MIN = 1;
 export const PAIN_SCORE_MAX = 10;
+const WEEKDAY_SHORT_TO_NUM: Record<string, number> = {
+    Sun: 0,
+    Mon: 1,
+    Tue: 2,
+    Wed: 3,
+    Thu: 4,
+    Fri: 5,
+    Sat: 6,
+};
 
 export const PAIN_SCALE_METADATA = {
     field: "pain",
@@ -154,14 +163,137 @@ export function getGenerationQuotaWindow() {
     return { start, endExclusive };
 }
 
-export function resolveWeeklyWindow(input: WeeklyInsightsBody) {
-    const anchor = input.weekStartDate ?? new Date();
-    const currentStart = input.weekStartDate
-        ? startOfUtcDay(input.weekStartDate)
-        : startOfUtcWeek(anchor, input.weekStartsOn);
+function addDaysYmd(
+    year: number,
+    month: number,
+    day: number,
+    days: number,
+) {
+    const utc = new Date(Date.UTC(year, month - 1, day));
+    utc.setUTCDate(utc.getUTCDate() + days);
 
-    const currentEndExclusive = addDaysUtc(currentStart, 7);
-    const previousStart = addDaysUtc(currentStart, -7);
+    return {
+        year: utc.getUTCFullYear(),
+        month: utc.getUTCMonth() + 1,
+        day: utc.getUTCDate(),
+    };
+}
+
+function getTimeZoneParts(date: Date, timeZone: string) {
+    const formatter = new Intl.DateTimeFormat("en-US", {
+        timeZone,
+        hour12: false,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        weekday: "short",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+    });
+
+    const parts = new Map(
+        formatter
+            .formatToParts(date)
+            .filter((part) => part.type !== "literal")
+            .map((part) => [part.type, part.value]),
+    );
+
+    const weekdayShort = parts.get("weekday");
+    const weekday = weekdayShort ? WEEKDAY_SHORT_TO_NUM[weekdayShort] : undefined;
+
+    return {
+        year: Number(parts.get("year")),
+        month: Number(parts.get("month")),
+        day: Number(parts.get("day")),
+        hour: Number(parts.get("hour")),
+        minute: Number(parts.get("minute")),
+        second: Number(parts.get("second")),
+        weekday: typeof weekday === "number" ? weekday : date.getUTCDay(),
+    };
+}
+
+function zonedDateTimeToUtc(
+    input: { year: number; month: number; day: number; hour: number; minute: number; second: number },
+    timeZone: string,
+) {
+    const utcGuess = Date.UTC(
+        input.year,
+        input.month - 1,
+        input.day,
+        input.hour,
+        input.minute,
+        input.second,
+    );
+
+    const tzParts = getTimeZoneParts(new Date(utcGuess), timeZone);
+    const asUtcMs = Date.UTC(
+        tzParts.year,
+        tzParts.month - 1,
+        tzParts.day,
+        tzParts.hour,
+        tzParts.minute,
+        tzParts.second,
+    );
+
+    const offsetMs = asUtcMs - utcGuess;
+    return new Date(utcGuess - offsetMs);
+}
+
+function startOfTimeZoneWeek(anchor: Date, weekStartsOn: "MONDAY" | "SUNDAY", timeZone: string) {
+    const local = getTimeZoneParts(anchor, timeZone);
+    const offset = weekStartsOn === "MONDAY"
+        ? ((local.weekday + 6) % 7)
+        : local.weekday;
+
+    const startYmd = addDaysYmd(local.year, local.month, local.day, -offset);
+    return zonedDateTimeToUtc(
+        { ...startYmd, hour: 0, minute: 0, second: 0 },
+        timeZone,
+    );
+}
+
+function addDaysAtTimeZoneMidnight(date: Date, days: number, timeZone: string) {
+    const local = getTimeZoneParts(date, timeZone);
+    const next = addDaysYmd(local.year, local.month, local.day, days);
+    return zonedDateTimeToUtc(
+        { ...next, hour: 0, minute: 0, second: 0 },
+        timeZone,
+    );
+}
+
+function startOfProvidedDateInTimeZone(date: Date, timeZone: string) {
+    const utcYear = date.getUTCFullYear();
+    const utcMonth = date.getUTCMonth() + 1;
+    const utcDay = date.getUTCDate();
+
+    return zonedDateTimeToUtc(
+        { year: utcYear, month: utcMonth, day: utcDay, hour: 0, minute: 0, second: 0 },
+        timeZone,
+    );
+}
+
+function resolveTimeZoneOrUtc(timeZone: string) {
+    try {
+        new Intl.DateTimeFormat("en-US", { timeZone }).format(new Date());
+        return timeZone;
+    } catch {
+        return "UTC";
+    }
+}
+
+export function resolveWeeklyWindow(input: WeeklyInsightsBody) {
+    const timeZone = resolveTimeZoneOrUtc(input.timeZone);
+    const currentStart = input.weekStartDate
+        ? startOfProvidedDateInTimeZone(input.weekStartDate, timeZone)
+        : addDaysAtTimeZoneMidnight(
+            startOfTimeZoneWeek(new Date(), input.weekStartsOn, timeZone),
+            -7,
+            timeZone,
+        );
+
+    const currentEndExclusive = addDaysAtTimeZoneMidnight(currentStart, 7, timeZone);
+    const previousStart = addDaysAtTimeZoneMidnight(currentStart, -7, timeZone);
     const previousEndExclusive = currentStart;
 
     return { currentStart, currentEndExclusive, previousStart, previousEndExclusive };
