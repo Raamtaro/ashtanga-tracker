@@ -113,7 +113,7 @@ export async function listPosesBySegment(req: Request, res: Response) {
         const poses = await prisma.pose.findMany({
             where,
             orderBy: [{ sequenceGroup: 'asc' }, { orderInGroup: 'asc' }, { sanskritName: 'asc' }],
-            select: { id: true, slug: true, sanskritName: true, englishName: true, isTwoSided: true, sequenceGroup: true },
+            select: { id: true, slug: true, sanskritName: true, englishName: true, isTwoSided: true, sequenceGroup: true, orderInGroup: true },
         });
 
         res.json({ count: poses.length, poses });
