@@ -84,11 +84,13 @@ export const getScoredPoses = async (req: Request, res: Response) => {
                 },
             },
         },
+        orderBy: [{ sequenceGroup: 'asc' }, { orderInGroup: 'asc' }, { sanskritName: 'asc' }],
         select: {
             id: true,
             sanskritName: true,
-            // englishName: true,
             slug: true,
+            isTwoSided: true,
+            sequenceGroup: true,
         },
     });
 
