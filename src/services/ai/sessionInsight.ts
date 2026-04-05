@@ -6,6 +6,7 @@ import {
     PAIN_SCALE_METADATA,
     HttpError,
     avg,
+    getSampleConfidence,
     painSeverityFromAverage,
     painSeverityFromScore,
     runJsonInsightPrompt,
@@ -28,6 +29,7 @@ export async function getSessionAiInsightResponse(userId: string, sessionId: str
                 select: {
                     id: true,
                     side: true,
+                    scored: true,
                     skipped: true,
                     overallScore: true,
                     notes: true,
@@ -55,11 +57,12 @@ export async function getSessionAiInsightResponse(userId: string, sessionId: str
 
     const scoreCards = session.scoreCards.map((c) => {
         const missingAny =
-            !c.skipped && REQUIRED_METRICS.some((k) => c[k] == null);
+            c.scored && !c.skipped && REQUIRED_METRICS.some((k) => c[k] == null);
 
         return {
             id: c.id,
             side: c.side,
+            scored: c.scored,
             skipped: c.skipped,
             overallScore: c.overallScore,
             isComplete: c.skipped ? true : !missingAny,
@@ -80,7 +83,7 @@ export async function getSessionAiInsightResponse(userId: string, sessionId: str
         };
     });
 
-    const activeCards = scoreCards.filter((c) => !c.skipped);
+    const activeCards = scoreCards.filter((c) => c.scored && !c.skipped);
 
     const metricAverages: Record<MetricKey, number | null> = {
         ease: avg(activeCards.map((c) => c.metrics.ease)),
@@ -109,6 +112,19 @@ export async function getSessionAiInsightResponse(userId: string, sessionId: str
         complete: scoreCards.filter((c) => c.isComplete).length,
         incomplete: scoreCards.filter((c) => !c.isComplete).length,
         firstIncompleteScoreCardId: scoreCards.find((c) => !c.isComplete)?.id ?? null,
+        scoredTotal: scoreCards.filter((c) => c.scored).length,
+        unscoredTotal: scoreCards.filter((c) => !c.scored).length,
+        analyzedScoredTotal: activeCards.length,
+        skippedScoredTotal: scoreCards.filter((c) => c.scored && c.skipped).length,
+        sampleConfidence: getSampleConfidence(activeCards.length),
+    };
+
+    const trackingCoverage = {
+        practicedCardCount: summary.total,
+        scoredCardCount: summary.scoredTotal,
+        analyzedScoredCardCount: summary.analyzedScoredTotal,
+        skippedScoredCardCount: summary.skippedScoredTotal,
+        scoringCoverageRate: summary.total > 0 ? Math.round((summary.scoredTotal / summary.total) * 10000) / 10000 : null,
     };
 
     const payloadForModel = {
@@ -122,6 +138,7 @@ export async function getSessionAiInsightResponse(userId: string, sessionId: str
             overallScore: session.overallScore,
         },
         summary,
+        trackingCoverage,
         computed: {
             metricAverages,
             painSeverityAverage: painSeverityFromAverage(metricAverages.pain),
@@ -135,6 +152,7 @@ export async function getSessionAiInsightResponse(userId: string, sessionId: str
             pose: c.pose.sanskritName,
             group: c.pose.sequenceGroup,
             side: c.side,
+            scored: c.scored,
             skipped: c.skipped,
             overallScore: c.overallScore,
             metrics: {
@@ -157,6 +175,8 @@ Return STRICT JSON with keys:
 
 Constraints:
 - No medical diagnosis.
+- Performance metrics are computed from scored cards only (scored=true and skipped=false).
+- Unscored cards represent intentional tracking opt-out and should not be framed as non-compliance.
 - Pain score is inverted: 10 = least pain (best), 1 = most pain (worst).
 - Treat lower pain score (or higher painSeverity) as higher pain concern.
 - If pain score is low or notes suggest injury, recommend caution and professional guidance.
@@ -176,7 +196,7 @@ Constraints:
             overallScore: session.overallScore,
             summary,
         },
-        computed: { metricAverages, painHotSpots },
+        computed: { metricAverages, painHotSpots, trackingCoverage },
         ai: completion.parsed,
         debug: { model: completion.model, raw: completion.raw },
     };

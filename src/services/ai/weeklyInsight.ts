@@ -3,6 +3,7 @@ import { buildWeeklyInsightsLlmInput } from "../../lib/insights/llmShapes.js";
 
 import {
     PAIN_SCALE_METADATA,
+    REQUIRED_METRICS,
     WEEKLY_INSIGHT_WEEKLY_LIMIT,
     HttpError,
     buildWeeklyComparison,
@@ -15,6 +16,78 @@ import {
     toPainSeverityStats,
     type WeeklyInsightsBody,
 } from "./shared.js";
+
+function computeRate(numerator: number, denominator: number) {
+    if (denominator <= 0) return null;
+    return Math.round((numerator / denominator) * 10000) / 10000;
+}
+
+async function getWeeklyTrackingCoverage(
+    userId: string,
+    start: Date,
+    endExclusive: Date,
+    includeDrafts: boolean,
+) {
+    const sessionWhere = {
+        userId,
+        date: { gte: start, lt: endExclusive },
+        ...(includeDrafts ? {} : { status: "PUBLISHED" as const }),
+    };
+    const baseWhere = { session: sessionWhere };
+
+    const [
+        practicedCardCount,
+        scoredCardCount,
+        analyzedScoredCardCount,
+        skippedScoredCardCount,
+        incompleteScoredCardCount,
+    ] = await Promise.all([
+        prisma.scoreCard.count({
+            where: baseWhere,
+        }),
+        prisma.scoreCard.count({
+            where: {
+                ...baseWhere,
+                scored: true,
+            },
+        }),
+        prisma.scoreCard.count({
+            where: {
+                ...baseWhere,
+                scored: true,
+                skipped: false,
+            },
+        }),
+        prisma.scoreCard.count({
+            where: {
+                ...baseWhere,
+                scored: true,
+                skipped: true,
+            },
+        }),
+        prisma.scoreCard.count({
+            where: {
+                ...baseWhere,
+                scored: true,
+                skipped: false,
+                OR: REQUIRED_METRICS.map((k) => ({ [k]: null })),
+            },
+        }),
+    ]);
+
+    const completeScoredCardCount = analyzedScoredCardCount - incompleteScoredCardCount;
+
+    return {
+        practicedCardCount,
+        scoredCardCount,
+        analyzedScoredCardCount,
+        skippedScoredCardCount,
+        completeScoredCardCount,
+        incompleteScoredCardCount,
+        scoringCoverageRate: computeRate(scoredCardCount, practicedCardCount),
+        completionRateWithinScored: computeRate(completeScoredCardCount, scoredCardCount),
+    };
+}
 
 export async function getWeeklyInsightsResponse(userId: string, body: WeeklyInsightsBody) {
     const window = resolveWeeklyWindow(body);
@@ -135,7 +208,7 @@ export async function getWeeklyInsightsResponse(userId: string, body: WeeklyInsi
         );
     }
 
-    const [currentSessions, previousSessions] = await Promise.all([
+    const [currentSessions, previousSessions, currentCoverage, previousCoverage] = await Promise.all([
         prisma.practiceSession.findMany({
             where: {
                 userId,
@@ -150,7 +223,7 @@ export async function getWeeklyInsightsResponse(userId: string, body: WeeklyInsi
                 durationMinutes: true,
                 notes: true,
                 scoreCards: {
-                    where: { skipped: false },
+                    where: { scored: true, skipped: false },
                     select: {
                         notes: true,
                         ease: true,
@@ -177,7 +250,7 @@ export async function getWeeklyInsightsResponse(userId: string, body: WeeklyInsi
                 durationMinutes: true,
                 notes: true,
                 scoreCards: {
-                    where: { skipped: false },
+                    where: { scored: true, skipped: false },
                     select: {
                         notes: true,
                         ease: true,
@@ -190,11 +263,13 @@ export async function getWeeklyInsightsResponse(userId: string, body: WeeklyInsi
                 },
             },
         }),
+        getWeeklyTrackingCoverage(userId, window.currentStart, window.currentEndExclusive, body.includeDrafts),
+        getWeeklyTrackingCoverage(userId, window.previousStart, window.previousEndExclusive, body.includeDrafts),
     ]);
 
-    const currentRollup = buildWeeklyRollup(currentSessions, body.timeZone);
+    const currentRollup = buildWeeklyRollup(currentSessions, body.timeZone, currentCoverage);
     const previousRollup = previousSessions.length > 0
-        ? buildWeeklyRollup(previousSessions, body.timeZone)
+        ? buildWeeklyRollup(previousSessions, body.timeZone, previousCoverage)
         : null;
 
     const comparison = buildWeeklyComparison(currentRollup, previousRollup);
@@ -241,6 +316,14 @@ export async function getWeeklyInsightsResponse(userId: string, body: WeeklyInsi
                     })),
                 }
                 : null,
+            trackingCoverage: {
+                currentWeek: llmInput.currentWeek.trackingCoverage,
+                previousWeek: llmInput.previousWeek?.trackingCoverage ?? null,
+                comparison: {
+                    scoringCoverageRateDelta: llmInput.comparison.scoringCoverageRateDelta,
+                    completionRateWithinScoredDelta: llmInput.comparison.completionRateWithinScoredDelta,
+                },
+            },
         },
     };
 
@@ -258,6 +341,8 @@ Return STRICT JSON with keys:
 Constraints:
 - Ground claims in data provided.
 - Mention uncertainty when sample size is low.
+- Performance metrics are computed from scored cards only (scored=true and skipped=false).
+- Unscored poses are intentional opt-out choices and must not be framed as non-compliance.
 - Pain score is inverted: 10 = least pain (best), 1 = most pain (worst).
 - Treat lower pain score (or higher painSeverity) as higher pain concern.
 - No medical diagnosis.

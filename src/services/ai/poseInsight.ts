@@ -16,6 +16,7 @@ import {
     HttpError,
     avg,
     dayPartForDate,
+    getSampleConfidence,
     getGenerationQuotaWindow,
     painSeverityFromAverage,
     resolvePoseWindow,
@@ -24,6 +25,11 @@ import {
     toPainSeverityStats,
     type PoseInsightsBody,
 } from "./shared.js";
+
+function computeRate(numerator: number, denominator: number) {
+    if (denominator <= 0) return null;
+    return Math.round((numerator / denominator) * 10000) / 10000;
+}
 
 export async function getPoseInsightsResponse(userId: string, poseIdParam: string | undefined, body: PoseInsightsBody) {
     const window = resolvePoseWindow(body);
@@ -153,37 +159,70 @@ export async function getPoseInsightsResponse(userId: string, poseIdParam: strin
         );
     }
 
-    const cards = await prisma.scoreCard.findMany({
-        where: {
-            poseId: pose.id,
-            skipped: false,
-            session: {
-                userId,
-                status: "PUBLISHED",
-                date: { gte: window.start, lt: window.endExclusive },
-            },
+    const poseScopeWhere = {
+        poseId: pose.id,
+        session: {
+            userId,
+            status: "PUBLISHED" as const,
+            date: { gte: window.start, lt: window.endExclusive },
         },
-        orderBy: [{ session: { date: "asc" } }, { id: "asc" }],
-        select: {
-            id: true,
-            side: true,
-            notes: true,
-            overallScore: true,
-            ease: true,
-            comfort: true,
-            stability: true,
-            pain: true,
-            breath: true,
-            focus: true,
-            session: {
-                select: {
-                    id: true,
-                    date: true,
-                    notes: true,
+    };
+
+    const [cards, practicedCardCount, scoredCardCount, skippedScoredCardCount] = await Promise.all([
+        prisma.scoreCard.findMany({
+            where: {
+                ...poseScopeWhere,
+                scored: true,
+                skipped: false,
+            },
+            orderBy: [{ session: { date: "asc" } }, { id: "asc" }],
+            select: {
+                id: true,
+                side: true,
+                notes: true,
+                overallScore: true,
+                ease: true,
+                comfort: true,
+                stability: true,
+                pain: true,
+                breath: true,
+                focus: true,
+                session: {
+                    select: {
+                        id: true,
+                        date: true,
+                        notes: true,
+                    },
                 },
             },
-        },
-    });
+        }),
+        prisma.scoreCard.count({
+            where: poseScopeWhere,
+        }),
+        prisma.scoreCard.count({
+            where: {
+                ...poseScopeWhere,
+                scored: true,
+            },
+        }),
+        prisma.scoreCard.count({
+            where: {
+                ...poseScopeWhere,
+                scored: true,
+                skipped: true,
+            },
+        }),
+    ]);
+
+    const analyzedScoredCardCount = cards.length;
+    const trackingCoverage = {
+        practicedCardCount,
+        scoredCardCount,
+        analyzedScoredCardCount,
+        skippedScoredCardCount,
+        scoringCoverageRate: computeRate(scoredCardCount, practicedCardCount),
+    };
+    const sampleConfidence = getSampleConfidence(analyzedScoredCardCount);
 
     const uniqueSessions = new Set(cards.map((card) => card.session.id));
     const metricStats = metricStatsMap(cards, REQUIRED_METRICS);
@@ -277,6 +316,8 @@ export async function getPoseInsightsResponse(userId: string, poseIdParam: strin
         summary: {
             totalSessions: uniqueSessions.size,
             totalScoreCards: cards.length,
+            trackingCoverage,
+            sampleConfidence,
             overallScoreStats: summarizeNumericStats(cards.map((card) => card.overallScore)),
             metricStats,
             sideBreakdown: [...sideMap.entries()].map(([side, rows]) => ({
@@ -359,6 +400,8 @@ Return STRICT JSON with keys:
 Constraints:
 - Use only provided data.
 - Explicitly acknowledge low sample size.
+- Performance metrics are computed from scored cards only (scored=true and skipped=false).
+- Unscored cards represent intentional tracking opt-out and must not be treated as missing compliance.
 - Pain score is inverted: 10 = least pain (best), 1 = most pain (worst).
 - Treat lower pain score (or higher painSeverity) as higher pain concern.
 - No medical diagnosis.

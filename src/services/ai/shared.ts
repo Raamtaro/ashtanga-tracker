@@ -157,6 +157,12 @@ export function computeDelta(current: number | null, previous: number | null) {
     return round(current - previous, 2);
 }
 
+export function getSampleConfidence(sampleCount: number): "LOW" | "MEDIUM" | "HIGH" {
+    if (sampleCount < 4) return "LOW";
+    if (sampleCount < 10) return "MEDIUM";
+    return "HIGH";
+}
+
 export function getGenerationQuotaWindow() {
     const start = startOfUtcWeek(new Date(), "MONDAY");
     const endExclusive = addDaysUtc(start, 7);
@@ -348,6 +354,7 @@ export function buildWeeklyRollup(
         }>;
     }>,
     timeZone: string,
+    trackingCoverage: WeeklyRollup["trackingCoverage"],
 ): WeeklyRollup {
     const dayPartBuckets = new Map<typeof DAY_PARTS[number], {
         scores: Array<number | null>;
@@ -414,6 +421,8 @@ export function buildWeeklyRollup(
                 note: session.notes!.trim(),
             })),
         sessionsWithNotes: sessions.filter((session) => typeof session.notes === "string" && session.notes.trim().length > 0).length,
+        trackingCoverage,
+        sampleConfidence: getSampleConfidence(trackingCoverage.analyzedScoredCardCount),
     };
 }
 
@@ -424,6 +433,8 @@ export function buildWeeklyComparison(current: WeeklyRollup, previous: WeeklyRol
             sessionCountDelta: current.sessionCount,
             averageOverallScoreDelta: null,
             averageDurationDeltaMinutes: null,
+            scoringCoverageRateDelta: null,
+            completionRateWithinScoredDelta: null,
             shiftedDayPart: null,
             noteKeywordDelta: {},
         };
@@ -446,6 +457,14 @@ export function buildWeeklyComparison(current: WeeklyRollup, previous: WeeklyRol
         sessionCountDelta: current.sessionCount - previous.sessionCount,
         averageOverallScoreDelta: computeDelta(current.averageOverallScore, previous.averageOverallScore),
         averageDurationDeltaMinutes: computeDelta(current.averageDurationMinutes, previous.averageDurationMinutes),
+        scoringCoverageRateDelta: computeDelta(
+            current.trackingCoverage.scoringCoverageRate,
+            previous.trackingCoverage.scoringCoverageRate,
+        ),
+        completionRateWithinScoredDelta: computeDelta(
+            current.trackingCoverage.completionRateWithinScored,
+            previous.trackingCoverage.completionRateWithinScored,
+        ),
         shiftedDayPart,
         noteKeywordDelta: keywordDelta(current.noteKeywordCounts, previous.noteKeywordCounts),
     };
@@ -462,6 +481,11 @@ export type SessionAiResponse = {
             complete: number;
             incomplete: number;
             firstIncompleteScoreCardId: string | null;
+            scoredTotal: number;
+            unscoredTotal: number;
+            analyzedScoredTotal: number;
+            skippedScoredTotal: number;
+            sampleConfidence: "LOW" | "MEDIUM" | "HIGH";
         };
     };
     computed: {
@@ -474,6 +498,13 @@ export type SessionAiResponse = {
             painSeverity: number | null;
             notes: string | null;
         }>;
+        trackingCoverage: {
+            practicedCardCount: number;
+            scoredCardCount: number;
+            analyzedScoredCardCount: number;
+            skippedScoredCardCount: number;
+            scoringCoverageRate: number | null;
+        };
     };
     ai: Record<string, unknown>;
     debug: {

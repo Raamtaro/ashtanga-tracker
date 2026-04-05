@@ -22,6 +22,19 @@ export type WeeklyNoteSample = {
     note: string;
 };
 
+export type ConfidenceLevel = "LOW" | "MEDIUM" | "HIGH";
+
+export type TrackingCoverage = {
+    practicedCardCount: number;
+    scoredCardCount: number;
+    analyzedScoredCardCount: number;
+    skippedScoredCardCount: number;
+    completeScoredCardCount: number;
+    incompleteScoredCardCount: number;
+    scoringCoverageRate: number | null;
+    completionRateWithinScored: number | null;
+};
+
 export type WeeklyRollup = {
     sessionCount: number;
     averageOverallScore: number | null;
@@ -32,6 +45,8 @@ export type WeeklyRollup = {
     noteKeywordCounts: Record<string, number>;
     noteSamples: WeeklyNoteSample[];
     sessionsWithNotes: number;
+    trackingCoverage: TrackingCoverage;
+    sampleConfidence: ConfidenceLevel;
 };
 
 export type WeeklyComparison = {
@@ -39,6 +54,8 @@ export type WeeklyComparison = {
     sessionCountDelta: number;
     averageOverallScoreDelta: number | null;
     averageDurationDeltaMinutes: number | null;
+    scoringCoverageRateDelta: number | null;
+    completionRateWithinScoredDelta: number | null;
     shiftedDayPart: {
         dayPart: DayPart;
         sessionDelta: number;
@@ -92,6 +109,14 @@ export interface PoseInsightsLlmInput {
     summary: {
         totalSessions: number;
         totalScoreCards: number;
+        trackingCoverage: {
+            practicedCardCount: number;
+            scoredCardCount: number;
+            analyzedScoredCardCount: number;
+            skippedScoredCardCount: number;
+            scoringCoverageRate: number | null;
+        };
+        sampleConfidence: ConfidenceLevel;
         overallScoreStats: NumericStats;
         metricStats: Record<MetricKey, NumericStats>;
         sideBreakdown: Array<{
