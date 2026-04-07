@@ -1,5 +1,3 @@
-import { describe, it } from "node:test";
-import assert from "node:assert/strict";
 import type { Prisma } from "@prisma/client";
 import { runPublishWorkflow } from "./publishSession.service.js";
 
@@ -70,8 +68,8 @@ describe("publishSession.service", () => {
 
         const result = await runPublishWorkflow(tx, { sessionId: "session_1", userId: "user_1" });
 
-        assert.equal(result.kind, "not_found");
-        assert.equal(practiceSessionFindFirst.calls.length, 1);
+        expect(result.kind).toBe("not_found");
+        expect(practiceSessionFindFirst.calls.length).toBe(1);
     });
 
     it("unpublishes when session is already published", async () => {
@@ -102,13 +100,13 @@ describe("publishSession.service", () => {
 
         const result = await runPublishWorkflow(tx, { sessionId: "session_1", userId: "user_1" });
 
-        assert.equal(result.kind, "ok");
+        expect(result.kind).toBe("ok");
         if (result.kind === "ok") {
-            assert.equal(result.session.status, "DRAFT");
-            assert.equal(result.session.id, "session_1");
+            expect(result.session.status).toBe("DRAFT");
+            expect(result.session.id).toBe("session_1");
         }
-        assert.equal(practiceSessionUpdate.calls.length, 1);
-        assert.equal(scoreCardFindFirst.calls.length, 0);
+        expect(practiceSessionUpdate.calls.length).toBe(1);
+        expect(scoreCardFindFirst.calls.length).toBe(0);
     });
 
     it("returns incomplete when scored unskipped card is missing required metrics", async () => {
@@ -143,10 +141,10 @@ describe("publishSession.service", () => {
 
         const result = await runPublishWorkflow(tx, { sessionId: "session_2", userId: "user_1" });
 
-        assert.equal(result.kind, "incomplete");
+        expect(result.kind).toBe("incomplete");
         if (result.kind === "incomplete") {
-            assert.equal(result.error.scoreCardId, "card_1");
-            assert.deepEqual(result.error.missing, ["comfort"]);
+            expect(result.error.scoreCardId).toBe("card_1");
+            expect(result.error.missing).toEqual(["comfort"]);
         }
     });
 
@@ -176,13 +174,13 @@ describe("publishSession.service", () => {
 
         const result = await runPublishWorkflow(tx, { sessionId: "session_3", userId: "user_1" });
 
-        assert.equal(result.kind, "ok");
+        expect(result.kind).toBe("ok");
         if (result.kind === "ok") {
-            assert.equal(result.session.status, "PUBLISHED");
-            assert.equal(result.session.overallScore, 8.25);
+            expect(result.session.status).toBe("PUBLISHED");
+            expect(result.session.overallScore).toBe(8.25);
         }
-        assert.equal(scoreCardUpdate.calls.length, 2);
-        assert.equal(scoreCardAggregate.calls.length, 1);
-        assert.equal(practiceSessionUpdate.calls.length, 1);
+        expect(scoreCardUpdate.calls.length).toBe(2);
+        expect(scoreCardAggregate.calls.length).toBe(1);
+        expect(practiceSessionUpdate.calls.length).toBe(1);
     });
 });

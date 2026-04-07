@@ -1,5 +1,3 @@
-import { describe, it } from "node:test";
-import assert from "node:assert/strict";
 import {
     buildSessionViewerSummary,
     computeCardOverall,
@@ -12,10 +10,10 @@ describe("basic.helpers", () => {
     it("encodeCursor/decodeCursor roundtrip and invalid decode", () => {
         const encoded = encodeCursor({ d: "2026-04-01T00:00:00.000Z", id: "session_123" });
         const decoded = decodeCursor(encoded);
-        assert.deepEqual(decoded, { d: "2026-04-01T00:00:00.000Z", id: "session_123" });
+        expect(decoded).toEqual({ d: "2026-04-01T00:00:00.000Z", id: "session_123" });
 
         const invalid = decodeCursor("not-a-valid-cursor");
-        assert.equal(invalid, undefined);
+        expect(invalid).toBeUndefined();
     });
 
     it("computeCardOverall returns null when no numeric metrics exist", () => {
@@ -27,7 +25,7 @@ describe("basic.helpers", () => {
             breath: null,
             focus: null,
         });
-        assert.equal(result, null);
+        expect(result).toBeNull();
     });
 
     it("computeCardOverall averages only numeric metrics and rounds to 2 decimals", () => {
@@ -39,7 +37,7 @@ describe("basic.helpers", () => {
             breath: null,
             focus: 6,
         });
-        assert.equal(result, 7.4);
+        expect(result).toBe(7.4);
     });
 
     it("toSessionViewerCards computes completion and UI flags based on scored/skipped/status", () => {
@@ -118,17 +116,17 @@ describe("basic.helpers", () => {
             "DRAFT",
         );
 
-        assert.equal(cards[0].isComplete, false);
-        assert.equal(cards[0].canEditScore, true);
-        assert.equal(cards[0].canToggleSkipped, false);
+        expect(cards[0].isComplete).toBe(false);
+        expect(cards[0].canEditScore).toBe(true);
+        expect(cards[0].canToggleSkipped).toBe(false);
 
-        assert.equal(cards[1].isComplete, true);
-        assert.equal(cards[1].canEditScore, false);
-        assert.equal(cards[1].canToggleSkipped, true);
+        expect(cards[1].isComplete).toBe(true);
+        expect(cards[1].canEditScore).toBe(false);
+        expect(cards[1].canToggleSkipped).toBe(true);
 
-        assert.equal(cards[2].isComplete, true);
-        assert.equal(cards[2].canEditScore, true);
-        assert.equal(cards[2].canToggleSkipped, false);
+        expect(cards[2].isComplete).toBe(true);
+        expect(cards[2].canEditScore).toBe(true);
+        expect(cards[2].canToggleSkipped).toBe(false);
     });
 
     it("buildSessionViewerSummary returns scored-focused and legacy counters", () => {
@@ -209,13 +207,13 @@ describe("basic.helpers", () => {
 
         const summary = buildSessionViewerSummary(practicedCards);
 
-        assert.equal(summary.totalScoreCards, 3);
-        assert.equal(summary.scoredScoreCards, 2);
-        assert.equal(summary.unscoredScoreCards, 1);
-        assert.equal(summary.activeScoreCards, 2);
-        assert.equal(summary.completeScoreCards, 1);
-        assert.equal(summary.incompleteScoreCards, 1);
-        assert.equal(summary.firstIncompleteScoreCardId, "incomplete_scored");
-        assert.equal(summary.total, 3); // legacy key
+        expect(summary.totalScoreCards).toBe(3);
+        expect(summary.scoredScoreCards).toBe(2);
+        expect(summary.unscoredScoreCards).toBe(1);
+        expect(summary.activeScoreCards).toBe(2);
+        expect(summary.completeScoreCards).toBe(1);
+        expect(summary.incompleteScoreCards).toBe(1);
+        expect(summary.firstIncompleteScoreCardId).toBe("incomplete_scored");
+        expect(summary.total).toBe(3); // legacy key
     });
 });
