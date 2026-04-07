@@ -7,6 +7,7 @@ const config: Config = {
     testMatch: ["**/*.test.ts"],
     moduleFileExtensions: ["ts", "js", "json"],
     extensionsToTreatAsEsm: [".ts"],
+    setupFiles: ["<rootDir>/src/test/setupEnv.ts"],
     transform: {
         "^.+\\.ts$": ["ts-jest", { useESM: true, tsconfig: "tsconfig.jest.json" }],
     },
