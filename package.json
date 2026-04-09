@@ -14,6 +14,7 @@
     "seedPoses": "tsx ./src/seed/seed.ts",
     "clearSessions": "tsx ./src/seed/clearSessions.ts",
     "clearPoses": "tsx ./src/seed/clearPoseData.ts",
+    "backfill60d": "tsx ./src/seed/backfill60days.ts",
     "migrate:deploy": "node ./src/modules/waitForDb.mjs && prisma migrate deploy"
   },
   "keywords": [],
