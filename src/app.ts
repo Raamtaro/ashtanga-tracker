@@ -1,6 +1,5 @@
 import express, { type Express, type NextFunction, type Request, type Response } from "express";
 import helmet from "helmet";
-import rateLimit from "express-rate-limit";
 import pinoHttp from "pino-http";
 import { randomUUID } from "crypto";
 import { ZodError } from "zod";
@@ -10,6 +9,7 @@ import passport from "passport";
 import routes from "./routes/index.js";
 import { localStrategy } from "./config/passportLocal.js";
 import { jwtStrategy } from "./config/passportJwt.js";
+import { aiLimiter, authLimiter } from "./lib/rateLimit.js";
 
 export function createApp(): Express {
     const app: Express = express();
@@ -50,14 +50,8 @@ export function createApp(): Express {
         }),
     );
 
-    const authLimiter = rateLimit({
-        windowMs: 15 * 60 * 1000,
-        limit: 50,
-        standardHeaders: true,
-        legacyHeaders: false,
-        message: { error: "Too many auth attempts. Try again later." },
-    });
     app.use("/auth", authLimiter);
+    app.use("/ai", aiLimiter);
 
     passport.use(localStrategy);
     passport.use(jwtStrategy);

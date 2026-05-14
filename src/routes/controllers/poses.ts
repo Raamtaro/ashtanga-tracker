@@ -6,27 +6,35 @@ import { ALLOWED_METRICS, type AllowedMetric, type PoseTrendResponse, type Trend
 
 
 const SEQUENCE_GROUPS = Object.values(SequenceGroup) as [SequenceGroup, ...SequenceGroup[]];
+const MAX_TREND_DAYS = 180;
+const MAX_TREND_POINTS = 500;
+
 const querySchema = z.object({
     fields: z.string().optional().transform((s) =>
-        s ? s.split(",").map((x) => x.trim()).filter(Boolean) : undefined
+        s ? s.split(",").map((x) => x.trim()).filter(Boolean) : undefined,
     ).refine(
         (arr) => !arr || arr.every((f) => (ALLOWED_METRICS as readonly string[]).includes(f)),
-        { message: `fields must be a comma-separated list of: ${ALLOWED_METRICS.join(", ")}` }
+        { message: `fields must be a comma-separated list of: ${ALLOWED_METRICS.join(", ")}` },
     ),
-    days: z.union([z.literal("all"), z.coerce.number().int().positive()]).optional().default(90),
+    days: z.coerce.number().int().positive().max(MAX_TREND_DAYS).optional().default(90),
     side: z.enum(["LEFT", "RIGHT", "NA", "BOTH", "ALL"]).optional(),
     includeSkipped: z.coerce.boolean().optional().default(false),
     from: z.coerce.date().optional(),
     to: z.coerce.date().optional(),
+    maxPoints: z.coerce.number().int().positive().max(MAX_TREND_POINTS).optional().default(250),
 }).refine((q) => (q.from && q.to ? q.from <= q.to : true), { message: "`from` must be <= `to`" });
 
+const poseDetailsQuerySchema = z.object({
+    includeCards: z.coerce.boolean().optional().default(false),
+    cardsLimit: z.coerce.number().int().positive().max(100).optional().default(25),
+});
 
 const posesQuerySchema = z.object({
     segment: z.preprocess((v) => {
         if (v == null) return undefined;
         if (Array.isArray(v)) return v; // supports ?segment=A&segment=B
         return String(v)
-            .split(',')
+            .split(",")
             .map((s) => s.trim())
             .filter(Boolean);
     }, z.array(z.enum(SEQUENCE_GROUPS)).optional()),
@@ -52,20 +60,19 @@ export const getAllPoses = async (req: Request, res: Response) => {
         {
             select: {
                 id: true,
-                // sanskritName: true,
                 sequenceGroup: true,
                 orderInGroup: true,
-                slug: true
-            }
-        }
-    )
+                slug: true,
+            },
+        },
+    );
 
     if (allPoses.length === 0) {
         return res.status(404).json({ message: "No poses found." });
     }
 
     res.json(allPoses);
-}
+};
 
 export const getScoredPoses = async (req: Request, res: Response) => {
     const client = req.user as { id: string } | undefined;
@@ -79,12 +86,11 @@ export const getScoredPoses = async (req: Request, res: Response) => {
                     skipped: false,
                     session: {
                         userId: client.id,
-                        // status: 'PUBLISHED',
                     },
                 },
             },
         },
-        orderBy: [{ sequenceGroup: 'asc' }, { orderInGroup: 'asc' }, { sanskritName: 'asc' }],
+        orderBy: [{ sequenceGroup: "asc" }, { orderInGroup: "asc" }, { sanskritName: "asc" }],
         select: {
             id: true,
             sanskritName: true,
@@ -99,7 +105,7 @@ export const getScoredPoses = async (req: Request, res: Response) => {
     }
 
     res.json(scoredPoses);
-}
+};
 
 export async function listPosesBySegment(req: Request, res: Response) {
     try {
@@ -112,35 +118,137 @@ export async function listPosesBySegment(req: Request, res: Response) {
 
         const poses = await prisma.pose.findMany({
             where,
-            orderBy: [{ sequenceGroup: 'asc' }, { orderInGroup: 'asc' }, { sanskritName: 'asc' }],
+            orderBy: [{ sequenceGroup: "asc" }, { orderInGroup: "asc" }, { sanskritName: "asc" }],
             select: { id: true, slug: true, sanskritName: true, englishName: true, isTwoSided: true, sequenceGroup: true, orderInGroup: true },
         });
 
         res.json({ count: poses.length, poses });
     } catch (err: any) {
-        res.status(400).json({ error: err?.message ?? 'Bad Request' });
+        res.status(400).json({ error: err?.message ?? "Bad Request" });
     }
 }
 
+export const getPoseById = async (req: Request, res: Response) => {
+    const client = req.user as { id: string } | undefined;
+    if (!client?.id) return res.status(401).json({ message: "Unauthorized" });
 
-export const getPoseById = async (req: Request, res: Response) => { //This will be used to trend metrics for a specific pose. User should be able to input which metrics they want to trend (can select multiple).
     const { id } = req.params;
+    const query = poseDetailsQuerySchema.parse(req.query ?? {});
 
     const pose = await prisma.pose.findUnique({
-        where: { id: id },
+        where: { id },
         select: {
+            id: true,
+            slug: true,
             englishName: true,
             sanskritName: true,
-            scoreCards: true
-        }
+            isTwoSided: true,
+            sequenceGroup: true,
+            orderInGroup: true,
+        },
     });
 
     if (!pose) {
         return res.status(404).json({ message: "Pose not found." });
     }
 
-    res.json(pose);
-}
+    const [practicedCardCount, scoredCardCount, analyzedScoredCardCount, latestScoredAt] = await Promise.all([
+        prisma.scoreCard.count({
+            where: {
+                poseId: pose.id,
+                session: {
+                    userId: client.id,
+                },
+            },
+        }),
+        prisma.scoreCard.count({
+            where: {
+                poseId: pose.id,
+                scored: true,
+                session: {
+                    userId: client.id,
+                },
+            },
+        }),
+        prisma.scoreCard.count({
+            where: {
+                poseId: pose.id,
+                scored: true,
+                skipped: false,
+                session: {
+                    userId: client.id,
+                },
+            },
+        }),
+        prisma.scoreCard.findFirst({
+            where: {
+                poseId: pose.id,
+                scored: true,
+                skipped: false,
+                session: {
+                    userId: client.id,
+                },
+            },
+            orderBy: [{ session: { date: "desc" } }, { orderInSession: "desc" }, { id: "desc" }],
+            select: {
+                session: {
+                    select: {
+                        date: true,
+                    },
+                },
+            },
+        }),
+    ]);
+
+    const usage = {
+        practicedCardCount,
+        scoredCardCount,
+        analyzedScoredCardCount,
+        latestAnalyzedSessionDate: latestScoredAt?.session.date.toISOString() ?? null,
+    };
+
+    if (!query.includeCards) {
+        return res.json({ pose, usage });
+    }
+
+    const cards = await prisma.scoreCard.findMany({
+        where: {
+            poseId: pose.id,
+            session: {
+                userId: client.id,
+            },
+        },
+        orderBy: [{ session: { date: "desc" } }, { orderInSession: "desc" }, { id: "desc" }],
+        take: query.cardsLimit,
+        select: {
+            id: true,
+            orderInSession: true,
+            side: true,
+            segment: true,
+            scored: true,
+            skipped: true,
+            overallScore: true,
+            session: {
+                select: {
+                    id: true,
+                    date: true,
+                    status: true,
+                },
+            },
+        },
+    });
+
+    return res.json({
+        pose,
+        usage,
+        cards,
+        page: {
+            includeCards: true,
+            cardsLimit: query.cardsLimit,
+            returnedCards: cards.length,
+        },
+    });
+};
 
 export const trendPoseMetrics = async (req: Request, res: Response) => {
     const client = req.user as { id: string } | undefined;
@@ -150,28 +258,23 @@ export const trendPoseMetrics = async (req: Request, res: Response) => {
         const { id } = req.params;
         const q = querySchema.parse(req.query);
 
-        // metrics
         const metrics: AllowedMetric[] =
             (q.fields as AllowedMetric[] | undefined) ?? [...ALLOWED_METRICS];
 
-        // window
         let { from, to } = normalizeFromTo(q.from, q.to);
 
-        if (!from && !to && q.days !== "all") {
+        if (!from && !to) {
             const end = new Date();
             const start = new Date(end.getTime() - q.days * 24 * 60 * 60 * 1000);
             from = start;
             to = end;
         }
 
-        // pose header
         const pose = await prisma.pose.findUnique({
             where: { id },
             select: { id: true, slug: true, sanskritName: true, englishName: true, isTwoSided: true },
         });
         if (!pose) return res.status(404).json({ message: "Pose not found." });
-
-        // where
 
         const sessionDate: Prisma.DateTimeFilter | undefined =
             from || to
@@ -180,27 +283,27 @@ export const trendPoseMetrics = async (req: Request, res: Response) => {
                     ...(to ? { lt: to } : {}),
                 }
                 : undefined;
+
         const where: Prisma.ScoreCardWhereInput = {
             poseId: id,
             scored: true,
             session: {
                 userId: client.id,
                 ...(sessionDate ? { date: sessionDate } : {}),
-                status: 'PUBLISHED',
+                status: "PUBLISHED",
             },
             ...(q.includeSkipped ? {} : { skipped: false }),
-            ...(q.side && q.side !== 'ALL'
-                ? { side: q.side === 'BOTH' ? { in: ['LEFT', 'RIGHT'] } : q.side }
+            ...(q.side && q.side !== "ALL"
+                ? { side: q.side === "BOTH" ? { in: ["LEFT", "RIGHT"] } : q.side }
                 : {}),
         };
 
-        // select only requested metrics
         const metricSelect = Object.fromEntries(metrics.map((m) => [m, true])) as Pick<
             Prisma.ScoreCardSelect,
             AllowedMetric
         >;
 
-        const cards = await prisma.scoreCard.findMany({
+        const rowsDesc = await prisma.scoreCard.findMany({
             where,
             select: {
                 id: true,
@@ -212,8 +315,12 @@ export const trendPoseMetrics = async (req: Request, res: Response) => {
                 session: { select: { date: true } },
                 ...metricSelect,
             },
-            orderBy: [{ session: { date: "asc" } }, { orderInSession: "asc" }],
+            orderBy: [{ session: { date: "desc" } }, { orderInSession: "desc" }, { id: "desc" }],
+            take: q.maxPoints + 1,
         });
+
+        const truncated = rowsDesc.length > q.maxPoints;
+        const cards = (truncated ? rowsDesc.slice(0, q.maxPoints) : rowsDesc).reverse();
 
         const points: TrendPoint[] = cards.map((c) => ({
             scoreCardId: c.id,
@@ -224,7 +331,7 @@ export const trendPoseMetrics = async (req: Request, res: Response) => {
             orderInSession: c.orderInSession,
             skipped: c.skipped,
             values: Object.fromEntries(
-                metrics.map((m) => [m, (c as any)[m] ?? null])
+                metrics.map((m) => [m, (c as any)[m] ?? null]),
             ) as TrendPoint["values"],
         }));
 
@@ -232,8 +339,19 @@ export const trendPoseMetrics = async (req: Request, res: Response) => {
             pose,
             metrics,
             window: { from: from?.toISOString(), to: to?.toISOString() },
+            page: {
+                maxPoints: q.maxPoints,
+                returnedPoints: points.length,
+                truncated,
+            },
             points,
-        } satisfies PoseTrendResponse);
+        } satisfies PoseTrendResponse & {
+            page: {
+                maxPoints: number;
+                returnedPoints: number;
+                truncated: boolean;
+            };
+        });
     } catch (err: any) {
         return res.status(400).json({ error: err?.message ?? "Bad Request" });
     }

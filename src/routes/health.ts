@@ -1,8 +1,9 @@
-import {Router} from 'express'
-import { healthAndGutCheck } from './controllers/health.js'
+import { Router } from "express";
+import { healthAndGutCheck, readinessCheck } from "./controllers/health.js";
 
 const router = Router();
 
-router.get('/', healthAndGutCheck) // Mainly for beta testing - it is intended to show up in the client build on the login page so that I can verify how the environment variables are being set
+router.get("/", healthAndGutCheck); // Liveness endpoint
+router.get("/ready", readinessCheck); // Readiness endpoint (checks DB reachability)
 
-export default router
+export default router;

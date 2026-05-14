@@ -8,6 +8,8 @@ const prismaMock: any = {
     },
     scoreCard: {
         findMany: jest.fn(),
+        findFirst: jest.fn(),
+        count: jest.fn(),
     },
 };
 
@@ -17,6 +19,7 @@ jest.unstable_mockModule("../../lib/prisma.js", () => ({
 
 const {
     getAllPoses,
+    getPoseById,
     getScoredPoses,
     listPosesBySegment,
     trendPoseMetrics,
@@ -92,6 +95,118 @@ describe("poses controller", () => {
         expect(res.json).toHaveBeenCalledWith({ message: "No scored poses found." });
     });
 
+    it("getPoseById returns 401 for unauthenticated request", async () => {
+        const req = createReqMock({ params: { id: "pose_1" }, query: {} });
+        const res = createResMock();
+
+        await getPoseById(req, res);
+
+        expect(res.status).toHaveBeenCalledWith(401);
+        expect(res.json).toHaveBeenCalledWith({ message: "Unauthorized" });
+    });
+
+    it("getPoseById returns scoped pose usage summary", async () => {
+        prismaMock.pose.findUnique.mockResolvedValue({
+            id: "pose_1",
+            slug: "pose-a",
+            sanskritName: "Pose A",
+            englishName: null,
+            isTwoSided: false,
+            sequenceGroup: "STANDING",
+            orderInGroup: 1,
+        });
+
+        prismaMock.scoreCard.count
+            .mockResolvedValueOnce(12)
+            .mockResolvedValueOnce(9)
+            .mockResolvedValueOnce(8);
+
+        prismaMock.scoreCard.findFirst.mockResolvedValue({
+            session: { date: new Date("2026-04-07T06:00:00.000Z") },
+        });
+
+        const req = createReqMock({
+            user: { id: "user_1" },
+            params: { id: "pose_1" },
+            query: {},
+        });
+        const res = createResMock();
+
+        await getPoseById(req, res);
+
+        expect(res.json).toHaveBeenCalledWith({
+            pose: expect.objectContaining({ id: "pose_1", slug: "pose-a" }),
+            usage: {
+                practicedCardCount: 12,
+                scoredCardCount: 9,
+                analyzedScoredCardCount: 8,
+                latestAnalyzedSessionDate: "2026-04-07T06:00:00.000Z",
+            },
+        });
+        expect(prismaMock.scoreCard.findMany).not.toHaveBeenCalled();
+    });
+
+    it("getPoseById returns bounded card list when includeCards=true", async () => {
+        prismaMock.pose.findUnique.mockResolvedValue({
+            id: "pose_1",
+            slug: "pose-a",
+            sanskritName: "Pose A",
+            englishName: null,
+            isTwoSided: false,
+            sequenceGroup: "STANDING",
+            orderInGroup: 1,
+        });
+
+        prismaMock.scoreCard.count
+            .mockResolvedValueOnce(2)
+            .mockResolvedValueOnce(2)
+            .mockResolvedValueOnce(2);
+
+        prismaMock.scoreCard.findFirst.mockResolvedValue({
+            session: { date: new Date("2026-04-07T06:00:00.000Z") },
+        });
+
+        prismaMock.scoreCard.findMany.mockResolvedValue([
+            {
+                id: "card_1",
+                orderInSession: 1,
+                side: "NA",
+                segment: "STANDING",
+                scored: true,
+                skipped: false,
+                overallScore: 8,
+                session: {
+                    id: "session_1",
+                    date: new Date("2026-04-07T06:00:00.000Z"),
+                    status: "PUBLISHED",
+                },
+            },
+        ]);
+
+        const req = createReqMock({
+            user: { id: "user_1" },
+            params: { id: "pose_1" },
+            query: { includeCards: "true", cardsLimit: "10" },
+        });
+        const res = createResMock();
+
+        await getPoseById(req, res);
+
+        expect(prismaMock.scoreCard.findMany).toHaveBeenCalledWith(
+            expect.objectContaining({ take: 10 }),
+        );
+        expect(res.json).toHaveBeenCalledWith(
+            expect.objectContaining({
+                cards: [expect.objectContaining({ id: "card_1" })],
+                page: {
+                    includeCards: true,
+                    cardsLimit: 10,
+                    returnedCards: 1,
+                },
+            }),
+        );
+    });
+
     it("trendPoseMetrics returns 401 for unauthenticated request", async () => {
         const req = createReqMock({
             params: { id: "pose_1" },
@@ -103,6 +218,22 @@ describe("poses controller", () => {
 
         expect(res.status).toHaveBeenCalledWith(401);
         expect(res.json).toHaveBeenCalledWith({ message: "Unauthorized" });
+    });
+
+    it("trendPoseMetrics rejects invalid days values", async () => {
+        const req = createReqMock({
+            user: { id: "user_1" },
+            params: { id: "pose_1" },
+            query: { days: "all" },
+        });
+        const res = createResMock();
+
+        await trendPoseMetrics(req, res);
+
+        expect(res.status).toHaveBeenCalledWith(400);
+        expect(res.json).toHaveBeenCalledWith(
+            expect.objectContaining({ error: expect.any(String) }),
+        );
     });
 
     it("trendPoseMetrics returns 404 when pose is missing", async () => {
@@ -147,7 +278,7 @@ describe("poses controller", () => {
         const req = createReqMock({
             user: { id: "user_1" },
             params: { id: "pose_1" },
-            query: { fields: "ease,pain", days: "30" },
+            query: { fields: "ease,pain", days: "30", maxPoints: "100" },
         });
         const res = createResMock();
 
@@ -159,6 +290,11 @@ describe("poses controller", () => {
                     id: "pose_1",
                 }),
                 metrics: ["ease", "pain"],
+                page: expect.objectContaining({
+                    maxPoints: 100,
+                    returnedPoints: 1,
+                    truncated: false,
+                }),
                 points: [
                     expect.objectContaining({
                         scoreCardId: "card_1",
@@ -169,4 +305,3 @@ describe("poses controller", () => {
         );
     });
 });
-
